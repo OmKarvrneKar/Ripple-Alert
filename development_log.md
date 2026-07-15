@@ -29,3 +29,11 @@ This document outlines the step-by-step process used to build, test, and deploy 
   - Added a `POST /rules` endpoint in `main.py` allowing users to configure price alerts (e.g., BTC below $60k).
   - Created a new standalone process `alert_engine.py` that subscribes to the Redis `prices` channel.
   - The engine continuously compares incoming live prices against active user rules, triggering and logging clear alerts when thresholds are crossed, and resetting them when prices bounce back.
+
+## Step 6: Extended Alert System & Rolling Windows
+- **Action**: Added alert history logging and rolling percent change rule.
+- **Details**: 
+  - Added an `alert_history` table and a `GET /alert-history` endpoint to serve the log of fired alerts back to the user interface.
+  - Expanded the rule logic to support a `percent_change_in_window` condition (e.g., BTC moved > 3% in 60 minutes).
+  - Used Redis Sorted Sets (`ZADD` and `ZREMRANGEBYSCORE`) to efficiently track historical prices bounded by the rolling window on the fly.
+  - Updated the frontend UI to fetch and render the user's alert history cleanly below the live prices section.
