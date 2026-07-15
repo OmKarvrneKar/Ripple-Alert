@@ -3,11 +3,16 @@ import time
 import requests
 import logging
 from datetime import datetime
+import redis
+import json
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 DB_FILE = 'prices.db'
+
+# Connect to Redis
+redis_client = redis.Redis(host='127.0.0.1', port=6379, decode_responses=True)
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -32,7 +37,6 @@ def fetch_prices():
     
     try:
         response = requests.get(url, params=params, timeout=10)
-        # Raise an HTTPError if the HTTP request returned an unsuccessful status code
         response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
@@ -45,38 +49,57 @@ def fetch_prices():
         logging.error(f"Error fetching prices: {e}")
         return None
 
-def save_prices(data):
+def process_and_publish(data):
     if not data:
         return
         
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     timestamp = datetime.utcnow().isoformat()
+    prices_update = {}
     
     try:
         if 'bitcoin' in data and 'usd' in data['bitcoin']:
+            btc_price = data['bitcoin']['usd']
             cursor.execute('INSERT INTO prices (symbol, price, timestamp) VALUES (?, ?, ?)', 
-                           ('BTC', data['bitcoin']['usd'], timestamp))
+                           ('BTC', btc_price, timestamp))
+            prices_update['BTC'] = btc_price
+            
         if 'ethereum' in data and 'usd' in data['ethereum']:
+            eth_price = data['ethereum']['usd']
             cursor.execute('INSERT INTO prices (symbol, price, timestamp) VALUES (?, ?, ?)', 
-                           ('ETH', data['ethereum']['usd'], timestamp))
+                           ('ETH', eth_price, timestamp))
+            prices_update['ETH'] = eth_price
+            
         conn.commit()
         logging.info("Prices saved to database.")
+        
+        # Publish to Redis
+        payload = {
+            "type": "prices",
+            "data": prices_update,
+            "timestamp": timestamp
+        }
+        redis_client.publish("prices", json.dumps(payload))
+        logging.info("Prices published to Redis channel 'prices'.")
+        
     except sqlite3.Error as e:
         logging.error(f"Database error: {e}")
+    except redis.RedisError as e:
+        logging.error(f"Redis error: {e}")
     finally:
         conn.close()
 
 def main():
     init_db()
-    logging.info("Starting RippleAlert price fetcher...")
+    logging.info("Starting standalone RippleAlert price fetcher...")
     
     backoff = 10
     
     while True:
         data = fetch_prices()
         if data:
-            save_prices(data)
+            process_and_publish(data)
             backoff = 10 # reset backoff on success
             time.sleep(10)
         else:
