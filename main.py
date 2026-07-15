@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -6,6 +6,9 @@ import sqlite3
 import jwt
 import hashlib
 from datetime import datetime, timedelta
+import asyncio
+from typing import List
+import fetcher
 
 app = FastAPI(title="RippleAlert API")
 
@@ -23,6 +26,74 @@ ALGORITHM = "HS256"
 
 USERS_DB = "users.db"
 PRICES_DB = "prices.db"
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        # Create a copy of the list to iterate over
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                self.disconnect(connection)
+
+manager = ConnectionManager()
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the background task to fetch and broadcast prices
+    asyncio.create_task(price_fetcher_task())
+
+async def price_fetcher_task():
+    fetcher.init_db()
+    while True:
+        try:
+            # Fetch data using the existing fetcher module
+            data = await asyncio.to_thread(fetcher.fetch_prices)
+            if data:
+                # Save data to the prices.db database
+                await asyncio.to_thread(fetcher.save_prices, data)
+                
+                # Extract and format the update for WebSocket broadcast
+                prices_update = {}
+                if 'bitcoin' in data and 'usd' in data['bitcoin']:
+                    prices_update['BTC'] = data['bitcoin']['usd']
+                if 'ethereum' in data and 'usd' in data['ethereum']:
+                    prices_update['ETH'] = data['ethereum']['usd']
+                
+                timestamp = datetime.utcnow().isoformat()
+                
+                # Broadcast the live update
+                await manager.broadcast({
+                    "type": "prices", 
+                    "data": prices_update, 
+                    "timestamp": timestamp
+                })
+        except Exception as e:
+            print("Error in background task:", e)
+            
+        # Poll exactly every 10 seconds (as per the original fetcher interval)
+        await asyncio.sleep(10)
+
+@app.websocket("/ws/prices")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep the connection alive; clients aren't expected to send meaningful messages right now
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 def get_db_connection(db_name):
     conn = sqlite3.connect(db_name, check_same_thread=False)
