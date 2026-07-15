@@ -4,11 +4,12 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 import sqlite3
 import jwt
-import hashlib
 from datetime import datetime, timedelta
 import asyncio
 from typing import List
-import fetcher
+import json
+import redis.asyncio as redis
+from passlib.context import CryptContext
 
 app = FastAPI(title="RippleAlert API")
 
@@ -23,9 +24,11 @@ app.add_middleware(
 
 SECRET_KEY = "supersecretkey"
 ALGORITHM = "HS256"
-
 USERS_DB = "users.db"
 PRICES_DB = "prices.db"
+
+# Password hashing setup
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class ConnectionManager:
     def __init__(self):
@@ -40,7 +43,6 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        # Create a copy of the list to iterate over
         for connection in list(self.active_connections):
             try:
                 await connection.send_json(message)
@@ -51,46 +53,26 @@ manager = ConnectionManager()
 
 @app.on_event("startup")
 async def startup_event():
-    # Start the background task to fetch and broadcast prices
-    asyncio.create_task(price_fetcher_task())
+    asyncio.create_task(redis_listener())
 
-async def price_fetcher_task():
-    fetcher.init_db()
-    while True:
-        try:
-            # Fetch data using the existing fetcher module
-            data = await asyncio.to_thread(fetcher.fetch_prices)
-            if data:
-                # Save data to the prices.db database
-                await asyncio.to_thread(fetcher.save_prices, data)
-                
-                # Extract and format the update for WebSocket broadcast
-                prices_update = {}
-                if 'bitcoin' in data and 'usd' in data['bitcoin']:
-                    prices_update['BTC'] = data['bitcoin']['usd']
-                if 'ethereum' in data and 'usd' in data['ethereum']:
-                    prices_update['ETH'] = data['ethereum']['usd']
-                
-                timestamp = datetime.utcnow().isoformat()
-                
-                # Broadcast the live update
-                await manager.broadcast({
-                    "type": "prices", 
-                    "data": prices_update, 
-                    "timestamp": timestamp
-                })
-        except Exception as e:
-            print("Error in background task:", e)
-            
-        # Poll exactly every 10 seconds (as per the original fetcher interval)
-        await asyncio.sleep(10)
+async def redis_listener():
+    try:
+        r = redis.Redis(host='127.0.0.1', port=6379, decode_responses=True)
+        pubsub = r.pubsub()
+        await pubsub.subscribe("prices")
+        
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                data = json.loads(message["data"])
+                await manager.broadcast(data)
+    except Exception as e:
+        print(f"Redis listener error: {e}")
 
 @app.websocket("/ws/prices")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep the connection alive; clients aren't expected to send meaningful messages right now
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -133,10 +115,10 @@ class WatchlistItem(BaseModel):
     symbol: str
 
 def get_password_hash(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return get_password_hash(plain_password) == hashed_password
+    return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict):
     to_encode = data.copy()
