@@ -4,3 +4,5 @@ uvicorn
 pyjwt
 pydantic
 websockets
+passlib[bcrypt]
+redis
