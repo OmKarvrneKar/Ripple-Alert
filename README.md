@@ -5,6 +5,7 @@ RippleAlert is a full-stack Python application that fetches the current price of
 ## Features
 - **Standalone Price Fetcher (`fetcher.py`)**: Fetches real-time crypto prices every 10 seconds, stores them in SQLite, and publishes them to a Redis channel.
 - **FastAPI Backend (`main.py`)**: Subscribes to the Redis pub/sub channel, provides user authentication (JWT + Bcrypt), and forwards live prices to browsers via WebSockets.
+- **Alert Engine (`alert_engine.py`)**: Subscribes to Redis and checks live prices against user-defined alert rules, triggering and resetting alert logs automatically.
 - **Dynamic Frontend**: A lightweight HTML/JS interface that instantly flashes live updates as prices arrive over the WebSocket connection without polling.
 
 ## Prerequisites
@@ -34,7 +35,11 @@ RippleAlert is a full-stack Python application that fetches the current price of
    ```bash
    python -m uvicorn main:app --port 8000
    ```
-4. **Open the Frontend**:
+4. **Start the Alert Engine** (in a new terminal):
+   ```bash
+   python alert_engine.py
+   ```
+5. **Open the Frontend**:
    Open `frontend/index.html` in your web browser.
 
 ## Architecture

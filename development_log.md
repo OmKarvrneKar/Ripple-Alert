@@ -21,3 +21,11 @@ This document outlines the step-by-step process used to build, test, and deploy 
   - `main.py` runs a background task using `redis.asyncio` that subscribes to the Redis channel. 
   - When messages arrive from Redis, `main.py` instantly forwards them across open WebSockets to all connected browser clients.
   - This architecture ensures strict decoupling: the FastAPI server can be restarted safely without interrupting the independent `fetcher.py` process.
+
+## Step 5: Alert Engine
+- **Action**: Created `alert_engine.py` and `/rules` endpoint.
+- **Details**: 
+  - Added a `rules` table in the SQLite database to store user-defined alert thresholds.
+  - Added a `POST /rules` endpoint in `main.py` allowing users to configure price alerts (e.g., BTC below $60k).
+  - Created a new standalone process `alert_engine.py` that subscribes to the Redis `prices` channel.
+  - The engine continuously compares incoming live prices against active user rules, triggering and logging clear alerts when thresholds are crossed, and resetting them when prices bounce back.
