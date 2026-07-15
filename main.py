@@ -100,6 +100,17 @@ def init_users_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            condition TEXT NOT NULL,
+            threshold REAL NOT NULL,
+            is_currently_triggered BOOLEAN DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -113,6 +124,11 @@ class UserCreate(BaseModel):
 
 class WatchlistItem(BaseModel):
     symbol: str
+
+class RuleCreate(BaseModel):
+    symbol: str
+    condition: str
+    threshold: float
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -179,6 +195,20 @@ def add_to_watchlist(item: WatchlistItem, current_user: dict = Depends(get_curre
         raise HTTPException(status_code=400, detail="Symbol already in watchlist")
     conn.close()
     return {"message": f"{item.symbol.upper()} added to watchlist"}
+
+@app.post("/rules")
+def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)):
+    if rule.condition not in ["below", "above"]:
+        raise HTTPException(status_code=400, detail="Condition must be 'below' or 'above'")
+        
+    conn = get_db_connection(USERS_DB)
+    conn.execute('''
+        INSERT INTO rules (user_id, symbol, condition, threshold, is_currently_triggered) 
+        VALUES (?, ?, ?, ?, 0)
+    ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold))
+    conn.commit()
+    conn.close()
+    return {"message": f"Rule created: Alert when {rule.symbol.upper()} is {rule.condition} {rule.threshold}"}
 
 @app.get("/watchlist")
 def get_watchlist(current_user: dict = Depends(get_current_user)):
