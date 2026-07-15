@@ -107,7 +107,19 @@ def init_users_db():
             symbol TEXT NOT NULL,
             condition TEXT NOT NULL,
             threshold REAL NOT NULL,
+            window_minutes REAL,
             is_currently_triggered BOOLEAN DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS alert_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            rule_description TEXT NOT NULL,
+            triggered_price REAL NOT NULL,
+            timestamp TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
@@ -129,6 +141,7 @@ class RuleCreate(BaseModel):
     symbol: str
     condition: str
     threshold: float
+    window_minutes: float = None
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -198,17 +211,26 @@ def add_to_watchlist(item: WatchlistItem, current_user: dict = Depends(get_curre
 
 @app.post("/rules")
 def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)):
-    if rule.condition not in ["below", "above"]:
-        raise HTTPException(status_code=400, detail="Condition must be 'below' or 'above'")
+    if rule.condition not in ["below", "above", "percent_change_in_window"]:
+        raise HTTPException(status_code=400, detail="Invalid condition")
+    if rule.condition == "percent_change_in_window" and not rule.window_minutes:
+        raise HTTPException(status_code=400, detail="window_minutes is required for percent_change_in_window")
         
     conn = get_db_connection(USERS_DB)
     conn.execute('''
-        INSERT INTO rules (user_id, symbol, condition, threshold, is_currently_triggered) 
-        VALUES (?, ?, ?, ?, 0)
-    ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold))
+        INSERT INTO rules (user_id, symbol, condition, threshold, window_minutes, is_currently_triggered) 
+        VALUES (?, ?, ?, ?, ?, 0)
+    ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold, rule.window_minutes))
     conn.commit()
     conn.close()
     return {"message": f"Rule created: Alert when {rule.symbol.upper()} is {rule.condition} {rule.threshold}"}
+
+@app.get("/alert-history")
+def get_alert_history(current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection(USERS_DB)
+    items = conn.execute("SELECT symbol, rule_description, triggered_price, timestamp FROM alert_history WHERE user_id = ? ORDER BY timestamp DESC", (current_user['id'],)).fetchall()
+    conn.close()
+    return {"history": [dict(item) for item in items]}
 
 @app.get("/watchlist")
 def get_watchlist(current_user: dict = Depends(get_current_user)):
