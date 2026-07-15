@@ -43,6 +43,19 @@
         <div id="prices-container"></div>
         <p id="ws-status" style="color: orange;">Connecting...</p>
 
+        <h3>Create Alert Rule</h3>
+        <input type="text" id="rule-symbol" placeholder="Symbol (e.g. BTC)" value="BTC">
+        <select id="rule-condition" onchange="toggleWindowInput()">
+            <option value="above">Above Threshold ($)</option>
+            <option value="below">Below Threshold ($)</option>
+            <option value="percent_change_in_window">Percent Change in Window (%)</option>
+        </select>
+        <input type="number" id="rule-threshold" placeholder="Threshold (e.g. 50000 or 5)" step="any">
+        <input type="number" id="rule-window" placeholder="Window (Minutes)" class="hidden" step="any">
+        <button onclick="createRule()">Create Rule</button>
+        <p id="rule-msg"></p>
+
+
         <h3>Alert History</h3>
         <div id="alert-history-container"></div>
     </div>
@@ -273,6 +286,48 @@
                 if (res.ok) fetchWatchlist();
             } catch(e) {
                 console.error("Failed to add to watchlist", e);
+            }
+        }
+
+        function toggleWindowInput() {
+            const condition = document.getElementById('rule-condition').value;
+            const windowInput = document.getElementById('rule-window');
+            if (condition === 'percent_change_in_window') {
+                windowInput.classList.remove('hidden');
+            } else {
+                windowInput.classList.add('hidden');
+            }
+        }
+
+        async function createRule() {
+            const symbol = document.getElementById('rule-symbol').value;
+            const condition = document.getElementById('rule-condition').value;
+            const threshold = parseFloat(document.getElementById('rule-threshold').value);
+            const window_minutes = document.getElementById('rule-window').value ? parseFloat(document.getElementById('rule-window').value) : null;
+            
+            if(!symbol || isNaN(threshold)) return alert("Symbol and threshold required");
+            if(condition === 'percent_change_in_window' && isNaN(window_minutes)) return alert("Window minutes required for percent change rule");
+
+            const payload = { symbol, condition, threshold };
+            if (condition === 'percent_change_in_window') {
+                payload.window_minutes = window_minutes;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/rules`, {
+                    method: 'POST',
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                const msgEl = document.getElementById('rule-msg');
+                msgEl.innerText = data.detail || data.message;
+                msgEl.style.color = res.ok ? 'green' : 'red';
+            } catch(e) {
+                console.error("Failed to create rule", e);
             }
         }
 
