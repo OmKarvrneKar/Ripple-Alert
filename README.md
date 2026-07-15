@@ -1,19 +1,20 @@
 # RippleAlert
 
-RippleAlert is a simple Python script that fetches the current price of Bitcoin (BTC) and Ethereum (ETH) in USD from the free CoinGecko API every 10 seconds. The prices are stored in a local SQLite database (`prices.db`).
+RippleAlert is a full-stack Python application that fetches the current price of Bitcoin (BTC) and Ethereum (ETH) in USD every 10 seconds. 
 
 ## Features
-- Fetches real-time crypto prices every 10 seconds.
-- Stores historical price data in a SQLite database.
-- Gracefully handles API rate limiting and connection errors with exponential backoff.
+- **Standalone Price Fetcher (`fetcher.py`)**: Fetches real-time crypto prices every 10 seconds, stores them in SQLite, and publishes them to a Redis channel.
+- **FastAPI Backend (`main.py`)**: Subscribes to the Redis pub/sub channel, provides user authentication (JWT + Bcrypt), and forwards live prices to browsers via WebSockets.
+- **Dynamic Frontend**: A lightweight HTML/JS interface that instantly flashes live updates as prices arrive over the WebSocket connection without polling.
 
 ## Prerequisites
 - Python 3.x
 - `pip` package manager
+- Redis (Running locally on port 6379, e.g., via `docker run -d -p 6379:6379 redis`)
 
 ## Installation
 
-1. Clone or download the repository (or navigate to the project folder).
+1. Clone or download the repository.
 2. Install the required dependencies:
    ```bash
    pip install -r requirements.txt
@@ -21,18 +22,22 @@ RippleAlert is a simple Python script that fetches the current price of Bitcoin 
 
 ## Usage
 
-Run the fetcher script:
-```bash
-python fetcher.py
-```
+1. **Start Redis**:
+   ```bash
+   docker run -d -p 6379:6379 redis
+   ```
+2. **Start the Fetcher** (in a new terminal):
+   ```bash
+   python fetcher.py
+   ```
+3. **Start the API Server** (in a new terminal):
+   ```bash
+   python -m uvicorn main:app --port 8000
+   ```
+4. **Open the Frontend**:
+   Open `frontend/index.html` in your web browser.
 
-Press `Ctrl+C` to stop the script.
-
-## Database Schema
-The data is stored in `prices.db` with the following schema:
-- `id`: Integer Primary Key
-- `symbol`: Text (e.g., 'BTC', 'ETH')
-- `price`: Real (e.g., 50000.0)
-- `timestamp`: Text (ISO 8601 format)
-
-# Ripple-Alert
+## Architecture
+- **prices.db**: SQLite DB storing all historical price data.
+- **users.db**: SQLite DB storing user accounts (secured with bcrypt) and watchlists safely.
+- **Redis**: Acts as the message broker decoupling the fetcher and the API server.
