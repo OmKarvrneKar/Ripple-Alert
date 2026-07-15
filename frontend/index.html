@@ -12,8 +12,10 @@
         button, input { margin: 5px 0; padding: 10px; border-radius: 4px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
         button { background-color: #007bff; color: white; border: none; cursor: pointer; }
         button:hover { background-color: #0056b3; }
-        .price-box { padding: 10px; border-bottom: 1px solid #eee; }
+        .price-box { padding: 10px; border-bottom: 1px solid #eee; transition: background-color 0.3s; }
+        .price-box.highlight { background-color: #e6f7ff; }
         .price-box:last-child { border-bottom: none; }
+        #ws-status { font-size: 0.8em; margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
@@ -37,25 +39,91 @@
         <button onclick="addToWatchlist()">Add to Watchlist</button>
         <p id="wl-msg" style="color: green;"></p>
 
-        <h3>Latest Prices</h3>
+        <h3>Live Prices</h3>
         <div id="prices-container"></div>
+        <p id="ws-status" style="color: orange;">Connecting...</p>
     </div>
 
     <script>
         const API_URL = "http://127.0.0.1:8000";
+        const WS_URL = "ws://127.0.0.1:8000/ws/prices";
         let token = localStorage.getItem("token");
         let watchlist = [];
+        let ws = null;
+        let reconnectTimeout = null;
 
         function updateUI() {
             if (token) {
                 document.getElementById('auth-section').classList.add('hidden');
                 document.getElementById('app-section').classList.remove('hidden');
                 fetchWatchlist();
+                connectWebSocket();
             } else {
                 document.getElementById('auth-section').classList.remove('hidden');
                 document.getElementById('app-section').classList.add('hidden');
                 document.getElementById('prices-container').innerHTML = '';
+                if(ws) {
+                    ws.close();
+                    ws = null;
+                }
             }
+        }
+
+        function connectWebSocket() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                return; // Already connected or connecting
+            }
+            
+            document.getElementById('ws-status').innerText = "Connecting...";
+            document.getElementById('ws-status').style.color = "orange";
+            
+            ws = new WebSocket(WS_URL);
+            
+            ws.onopen = () => {
+                document.getElementById('ws-status').innerText = "Connected (Live)";
+                document.getElementById('ws-status').style.color = "green";
+                console.log("WebSocket connected");
+                clearTimeout(reconnectTimeout);
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type === "prices" && watchlist.length > 0) {
+                    const data = message.data;
+                    const timestamp = message.timestamp;
+                    
+                    const container = document.getElementById('prices-container');
+                    let html = "";
+                    for (const sym of watchlist) {
+                        if (data[sym]) {
+                            html += `<div class="price-box highlight"><strong>${sym}</strong>: $${data[sym]} <br><small style="color:#888;">${new Date(timestamp).toLocaleString()}</small></div>`;
+                        } else {
+                            html += `<div class="price-box"><strong>${sym}</strong>: Waiting for update...</div>`;
+                        }
+                    }
+                    container.innerHTML = html;
+                    
+                    // Remove highlight class after a short delay for a flash effect
+                    setTimeout(() => {
+                        const boxes = container.getElementsByClassName('price-box');
+                        for(let box of boxes) {
+                            box.classList.remove('highlight');
+                        }
+                    }, 500);
+                }
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('ws-status').innerText = "Disconnected. Reconnecting...";
+                document.getElementById('ws-status').style.color = "red";
+                console.log("WebSocket disconnected. Reconnecting in 3s...");
+                reconnectTimeout = setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onerror = (err) => {
+                console.error("WebSocket error:", err);
+                ws.close();
+            };
         }
 
         async function signup() {
@@ -121,12 +189,40 @@
                 if (res.ok) {
                     const data = await res.json();
                     watchlist = data.watchlist;
-                    pollPrices();
+                    // Try to fetch initial prices immediately using the existing endpoint
+                    // so the user doesn't have to wait up to 10 seconds for the first WebSocket broadcast
+                    fetchInitialPrices();
                 } else if(res.status === 401) {
                     logout(); // Token expired
                 }
             } catch(e) {
                 console.error("Failed to fetch watchlist", e);
+            }
+        }
+
+        async function fetchInitialPrices() {
+            if (!token || watchlist.length === 0) return;
+            const container = document.getElementById('prices-container');
+            // Only populate if it's currently empty (e.g. WebSocket hasn't fired yet)
+            if (container.innerHTML.trim() !== "") return;
+            
+            let html = "";
+            for (const sym of watchlist) {
+                try {
+                    const res = await fetch(`${API_URL}/latest-price/${sym}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        html += `<div class="price-box"><strong>${data.symbol}</strong>: $${data.price} <br><small style="color:#888;">${new Date(data.timestamp).toLocaleString()}</small></div>`;
+                    } else {
+                        html += `<div class="price-box"><strong>${sym}</strong>: Waiting for live update...</div>`;
+                    }
+                } catch (e) {
+                    html += `<div class="price-box"><strong>${sym}</strong>: Error connecting</div>`;
+                }
+            }
+            // Double check it's still empty before overwriting
+            if (container.innerHTML.trim() === "") {
+                container.innerHTML = html;
             }
         }
 
@@ -152,27 +248,6 @@
             }
         }
 
-        async function pollPrices() {
-            if (!token || watchlist.length === 0) return;
-            const container = document.getElementById('prices-container');
-            let html = "";
-            for (const sym of watchlist) {
-                try {
-                    const res = await fetch(`${API_URL}/latest-price/${sym}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        html += `<div class="price-box"><strong>${data.symbol}</strong>: $${data.price} <br><small style="color:#888;">${new Date(data.timestamp).toLocaleString()}</small></div>`;
-                    } else {
-                        html += `<div class="price-box"><strong>${sym}</strong>: Fetching...</div>`;
-                    }
-                } catch (e) {
-                    html += `<div class="price-box"><strong>${sym}</strong>: Error connecting</div>`;
-                }
-            }
-            container.innerHTML = html;
-        }
-
-        setInterval(pollPrices, 5000);
         updateUI();
     </script>
 </body>
