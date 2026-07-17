@@ -37,3 +37,11 @@ This document outlines the step-by-step process used to build, test, and deploy 
   - Expanded the rule logic to support a `percent_change_in_window` condition (e.g., BTC moved > 3% in 60 minutes).
   - Used Redis Sorted Sets (`ZADD` and `ZREMRANGEBYSCORE`) to efficiently track historical prices bounded by the rolling window on the fly.
   - Updated the frontend UI to fetch and render the user's alert history cleanly below the live prices section.
+
+## Step 7: Finalization & Containerization
+- **Action**: Migrated to PostgreSQL, orchestrated with Docker Compose, and prepared CI/CD.
+- **Details**: 
+  - **Database Migration**: Swapped SQLite for PostgreSQL (`psycopg2-binary`) to make the app production-ready. Unified the schema to use `DATABASE_URL` for the `users` and `prices` data.
+  - **Container Orchestration**: Added a comprehensive `docker-compose.yml` to orchestrate 5 distinct services: `web`, `worker`, `alert-engine`, `db` (Postgres 15), and `redis` (Redis 7).
+  - **Environment Context**: Updated all Python components to consume `DATABASE_URL`, `REDIS_HOST`, and `REDIS_PORT` dynamically from their container environment, falling back to localhost for local testing.
+  - **CI/CD Actions**: Wrote `.github/workflows/deploy.yml` to automate Render deployment triggers upon pushed commits to `main`.
