@@ -29,6 +29,35 @@ def log_alert_history(conn, user_id, symbol, rule_description, triggered_price, 
     ''', (user_id, symbol, rule_description, triggered_price, timestamp))
     cursor.close()
 
+def evaluate_rule(rule, current_price, current_ts, redis_client):
+    condition = rule['condition']
+    threshold = rule['threshold']
+    symbol = rule['symbol']
+    window_minutes = rule.get('window_minutes')
+    
+    condition_met = False
+    rule_description = ""
+    
+    if condition == "below" and current_price < threshold:
+        condition_met = True
+        rule_description = f"{symbol} below {threshold}"
+    elif condition == "above" and current_price > threshold:
+        condition_met = True
+        rule_description = f"{symbol} above {threshold}"
+    elif condition == "percent_change_in_window" and window_minutes:
+        start_ts = current_ts - (window_minutes * 60)
+        history = redis_client.zrangebyscore(f"history:{symbol}", start_ts, current_ts)
+        
+        for entry in history:
+            old_price = float(entry.split('_')[0])
+            pct_change = abs(current_price - old_price) / old_price * 100
+            if pct_change >= threshold:
+                condition_met = True
+                rule_description = f"{symbol} moved {pct_change:.2f}% (>= {threshold}%) in {window_minutes} mins"
+                break
+                
+    return condition_met, rule_description
+
 def check_rules(redis_client, prices_data, timestamp_str):
     conn = get_db_connection()
     try:
@@ -53,35 +82,12 @@ def check_rules(redis_client, prices_data, timestamp_str):
                 continue
                 
             current_price = prices_data[symbol]
-            threshold = rule['threshold']
-            condition = rule['condition']
             is_triggered = bool(rule['is_currently_triggered'])
-            window_minutes = rule['window_minutes']
             rule_id = rule['id']
             user_id = rule['user_id']
             email = rule['email']
             
-            condition_met = False
-            rule_description = ""
-            
-            if condition == "below" and current_price < threshold:
-                condition_met = True
-                rule_description = f"{symbol} below {threshold}"
-            elif condition == "above" and current_price > threshold:
-                condition_met = True
-                rule_description = f"{symbol} above {threshold}"
-            elif condition == "percent_change_in_window" and window_minutes:
-                # Get historical prices in window
-                start_ts = current_ts - (window_minutes * 60)
-                history = redis_client.zrangebyscore(f"history:{symbol}", start_ts, current_ts)
-                
-                for entry in history:
-                    old_price = float(entry.split('_')[0])
-                    pct_change = abs(current_price - old_price) / old_price * 100
-                    if pct_change >= threshold:
-                        condition_met = True
-                        rule_description = f"{symbol} moved {pct_change:.2f}% (>= {threshold}%) in {window_minutes} mins"
-                        break
+            condition_met, rule_description = evaluate_rule(rule, current_price, current_ts, redis_client)
                 
             if condition_met and not is_triggered:
                 # Trigger alert

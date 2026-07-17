@@ -30,7 +30,8 @@ def setup_test_db():
     conn.close()
 
     # Mock DB connection
-    with patch("main.get_db_connection", side_effect=get_test_db_connection):
+    with patch("main.get_db_connection", side_effect=get_test_db_connection), \
+         patch("alert_engine.get_db_connection", side_effect=get_test_db_connection):
         # We need to initialize the tables in the test schema
         from main import init_users_db
         init_users_db()
