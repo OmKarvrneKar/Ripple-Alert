@@ -34,6 +34,22 @@ def setup_test_db():
         # We need to initialize the tables in the test schema
         from main import init_users_db
         init_users_db()
+        
+        # Also create prices table for tests
+        conn = get_test_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS prices (
+                id SERIAL PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                price REAL NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+        ''')
+        conn.commit()
+        cur.close()
+        conn.close()
+        
         yield
     
     # Teardown
