@@ -8,7 +8,7 @@ import sys
 # Add root directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-test_db_url = "postgresql://ripple_user:ripple_pass@localhost:5432/ripplealert"
+test_db_url = "postgresql://ripple_user:ripple_pass@db:5432/ripplealert"
 
 # Configure the test connection overriding schema
 def get_test_db_connection():
