@@ -45,3 +45,12 @@ This document outlines the step-by-step process used to build, test, and deploy 
   - **Container Orchestration**: Added a comprehensive `docker-compose.yml` to orchestrate 5 distinct services: `web`, `worker`, `alert-engine`, `db` (Postgres 15), and `redis` (Redis 7).
   - **Environment Context**: Updated all Python components to consume `DATABASE_URL`, `REDIS_HOST`, and `REDIS_PORT` dynamically from their container environment, falling back to localhost for local testing.
   - **CI/CD Actions**: Wrote `.github/workflows/deploy.yml` to automate Render deployment triggers upon pushed commits to `main`.
+
+## Step 8: Live Deployment & Final Debugging
+- **Action**: Hardened the Docker deployment and resolved critical production dependency issues.
+- **Details**:
+  - **Connection Strings**: Solved an edge-case where `DATABASE_URL` injections from cloud providers start with `postgres://` instead of `postgresql://` by safely parsing and substituting the prefix for `psycopg2`.
+  - **Docker Compose Race Conditions**: Fixed intermittent startup failures where the `web`, `fetcher`, and `alert_engine` crashed trying to query Postgres before the database was ready. Addressed by wrapping initial connections in a 5-iteration exponential backoff loop.
+  - **Dependency Pinning**: Diagnosed a 500 Internal Server Error in `/login`. Discovered `passlib` broke due to an API change in `bcrypt` v4.1+. Fixed by pinning `bcrypt==4.0.1`.
+  - **Missing Dependencies**: Fixed a runtime crash due to missing `python-multipart` required by FastAPI's `OAuth2PasswordRequestForm`.
+  - **End-to-End Testing**: Validated the fully containerized system using an automated `test_docker.py` script that tests signup, WebSockets, rule insertion, and Alert History population.
