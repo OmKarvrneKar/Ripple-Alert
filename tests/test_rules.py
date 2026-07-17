@@ -1,5 +1,5 @@
 import pytest
-from main import get_db_connection
+import main
 import psycopg2.extras
 
 @pytest.fixture
@@ -33,7 +33,7 @@ async def test_create_threshold_rule(async_client, auth_token):
     assert response.status_code == 200
     
     # Query database to confirm is_currently_triggered is False
-    conn = get_db_connection()
+    conn = main.get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT * FROM rules WHERE symbol = 'BTC' AND condition = 'above' ORDER BY id DESC LIMIT 1")
     row = cur.fetchone()

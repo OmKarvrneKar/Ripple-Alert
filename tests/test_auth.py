@@ -1,6 +1,6 @@
 import pytest
 from passlib.context import CryptContext
-from main import get_db_connection
+import main
 
 # Re-use the hashing context to verify bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -11,7 +11,7 @@ async def test_signup_creates_bcrypt_user(async_client, test_user):
     assert response.status_code == 200
     
     # Query database to verify it is bcrypt hashed
-    conn = get_db_connection()
+    conn = main.get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT password_hash FROM users WHERE email = %s", (test_user["email"],))
     row = cur.fetchone()
