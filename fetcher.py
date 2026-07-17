@@ -1,4 +1,6 @@
-import sqlite3
+import os
+import psycopg2
+import psycopg2.extras
 import time
 import requests
 import logging
@@ -9,17 +11,20 @@ import json
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-DB_FILE = 'prices.db'
+# Environment variables with defaults
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@localhost/ripplealert")
+REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
 # Connect to Redis
-redis_client = redis.Redis(host='127.0.0.1', port=6379, decode_responses=True)
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = psycopg2.connect(DATABASE_URL)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS prices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             symbol TEXT NOT NULL,
             price REAL NOT NULL,
             timestamp TEXT NOT NULL
@@ -53,7 +58,7 @@ def process_and_publish(data):
     if not data:
         return
         
-    conn = sqlite3.connect(DB_FILE)
+    conn = psycopg2.connect(DATABASE_URL)
     cursor = conn.cursor()
     timestamp = datetime.utcnow().isoformat()
     prices_update = {}
@@ -61,13 +66,13 @@ def process_and_publish(data):
     try:
         if 'bitcoin' in data and 'usd' in data['bitcoin']:
             btc_price = data['bitcoin']['usd']
-            cursor.execute('INSERT INTO prices (symbol, price, timestamp) VALUES (?, ?, ?)', 
+            cursor.execute('INSERT INTO prices (symbol, price, timestamp) VALUES (%s, %s, %s)', 
                            ('BTC', btc_price, timestamp))
             prices_update['BTC'] = btc_price
             
         if 'ethereum' in data and 'usd' in data['ethereum']:
             eth_price = data['ethereum']['usd']
-            cursor.execute('INSERT INTO prices (symbol, price, timestamp) VALUES (?, ?, ?)', 
+            cursor.execute('INSERT INTO prices (symbol, price, timestamp) VALUES (%s, %s, %s)', 
                            ('ETH', eth_price, timestamp))
             prices_update['ETH'] = eth_price
             
@@ -83,7 +88,7 @@ def process_and_publish(data):
         redis_client.publish("prices", json.dumps(payload))
         logging.info("Prices published to Redis channel 'prices'.")
         
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         logging.error(f"Database error: {e}")
     except redis.RedisError as e:
         logging.error(f"Redis error: {e}")

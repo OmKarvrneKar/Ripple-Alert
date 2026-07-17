@@ -2,7 +2,9 @@ from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocke
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-import sqlite3
+import os
+import psycopg2
+import psycopg2.extras
 import jwt
 from datetime import datetime, timedelta
 import asyncio
@@ -24,8 +26,11 @@ app.add_middleware(
 
 SECRET_KEY = "supersecretkey"
 ALGORITHM = "HS256"
-USERS_DB = "users.db"
-PRICES_DB = "prices.db"
+
+# Environment variables with defaults
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@localhost/ripplealert")
+REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
 # Password hashing setup
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -57,7 +62,7 @@ async def startup_event():
 
 async def redis_listener():
     try:
-        r = redis.Redis(host='127.0.0.1', port=6379, decode_responses=True)
+        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
         pubsub = r.pubsub()
         await pubsub.subscribe("prices")
         
@@ -77,44 +82,44 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-def get_db_connection(db_name):
-    conn = sqlite3.connect(db_name, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+def get_db_connection():
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 def init_users_db():
-    conn = get_db_connection(USERS_DB)
-    conn.execute('''
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL
         )
     ''')
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS watchlist (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
             symbol TEXT NOT NULL,
             UNIQUE(user_id, symbol),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS rules (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
             symbol TEXT NOT NULL,
             condition TEXT NOT NULL,
             threshold REAL NOT NULL,
             window_minutes REAL,
-            is_currently_triggered BOOLEAN DEFAULT 0,
+            is_currently_triggered BOOLEAN DEFAULT FALSE,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS alert_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
             symbol TEXT NOT NULL,
             rule_description TEXT NOT NULL,
@@ -124,9 +129,13 @@ def init_users_db():
         )
     ''')
     conn.commit()
+    cursor.close()
     conn.close()
 
-init_users_db()
+try:
+    init_users_db()
+except Exception as e:
+    print(f"Could not initialize DB: {e}")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -164,8 +173,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid auth credentials")
         
-    conn = get_db_connection(USERS_DB)
-    user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cursor.fetchone()
+    cursor.close()
     conn.close()
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
@@ -173,22 +185,29 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @app.post("/signup")
 def signup(user: UserCreate):
-    conn = get_db_connection(USERS_DB)
-    existing = conn.execute("SELECT * FROM users WHERE email = ?", (user.email,)).fetchone()
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT * FROM users WHERE email = %s", (user.email,))
+    existing = cursor.fetchone()
     if existing:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="Email already registered")
         
     pwd_hash = get_password_hash(user.password)
-    conn.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (user.email, pwd_hash))
+    cursor.execute("INSERT INTO users (email, password_hash) VALUES (%s, %s)", (user.email, pwd_hash))
     conn.commit()
+    cursor.close()
     conn.close()
     return {"message": "User created successfully"}
 
 @app.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    conn = get_db_connection(USERS_DB)
-    user = conn.execute("SELECT * FROM users WHERE email = ?", (form_data.username,)).fetchone()
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT * FROM users WHERE email = %s", (form_data.username,))
+    user = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if not user or not verify_password(form_data.password, user['password_hash']):
@@ -199,13 +218,16 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.post("/watchlist")
 def add_to_watchlist(item: WatchlistItem, current_user: dict = Depends(get_current_user)):
-    conn = get_db_connection(USERS_DB)
+    conn = get_db_connection()
+    cursor = conn.cursor()
     try:
-        conn.execute("INSERT INTO watchlist (user_id, symbol) VALUES (?, ?)", (current_user['id'], item.symbol.upper()))
+        cursor.execute("INSERT INTO watchlist (user_id, symbol) VALUES (%s, %s)", (current_user['id'], item.symbol.upper()))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="Symbol already in watchlist")
+    cursor.close()
     conn.close()
     return {"message": f"{item.symbol.upper()} added to watchlist"}
 
@@ -216,39 +238,51 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
     if rule.condition == "percent_change_in_window" and not rule.window_minutes:
         raise HTTPException(status_code=400, detail="window_minutes is required for percent_change_in_window")
         
-    conn = get_db_connection(USERS_DB)
-    conn.execute('''
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
         INSERT INTO rules (user_id, symbol, condition, threshold, window_minutes, is_currently_triggered) 
-        VALUES (?, ?, ?, ?, ?, 0)
+        VALUES (%s, %s, %s, %s, %s, FALSE)
     ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold, rule.window_minutes))
     conn.commit()
+    cursor.close()
     conn.close()
     return {"message": f"Rule created: Alert when {rule.symbol.upper()} is {rule.condition} {rule.threshold}"}
 
 @app.get("/alert-history")
 def get_alert_history(current_user: dict = Depends(get_current_user)):
-    conn = get_db_connection(USERS_DB)
-    items = conn.execute("SELECT symbol, rule_description, triggered_price, timestamp FROM alert_history WHERE user_id = ? ORDER BY timestamp DESC", (current_user['id'],)).fetchall()
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT symbol, rule_description, triggered_price, timestamp FROM alert_history WHERE user_id = %s ORDER BY timestamp DESC", (current_user['id'],))
+    items = cursor.fetchall()
+    cursor.close()
     conn.close()
     return {"history": [dict(item) for item in items]}
 
 @app.get("/watchlist")
 def get_watchlist(current_user: dict = Depends(get_current_user)):
-    conn = get_db_connection(USERS_DB)
-    items = conn.execute("SELECT symbol FROM watchlist WHERE user_id = ?", (current_user['id'],)).fetchall()
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT symbol FROM watchlist WHERE user_id = %s", (current_user['id'],))
+    items = cursor.fetchall()
+    cursor.close()
     conn.close()
     return {"watchlist": [item['symbol'] for item in items]}
 
 @app.get("/latest-price/{symbol}")
 def get_latest_price(symbol: str):
-    conn = get_db_connection(PRICES_DB)
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        price_row = conn.execute("SELECT price, timestamp FROM prices WHERE symbol = ? ORDER BY timestamp DESC LIMIT 1", (symbol.upper(),)).fetchone()
+        cursor.execute("SELECT price, timestamp FROM prices WHERE symbol = %s ORDER BY timestamp DESC LIMIT 1", (symbol.upper(),))
+        price_row = cursor.fetchone()
+        cursor.close()
         conn.close()
         if price_row:
             return {"symbol": symbol.upper(), "price": price_row['price'], "timestamp": price_row['timestamp']}
         else:
             raise HTTPException(status_code=404, detail="Price not found")
-    except sqlite3.OperationalError:
+    except psycopg2.OperationalError:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=404, detail="Database not initialized or price not found")

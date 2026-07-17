@@ -1,4 +1,6 @@
-import sqlite3
+import os
+import psycopg2
+import psycopg2.extras
 import redis
 import json
 import logging
@@ -7,27 +9,33 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - ALERT ENGINE - %(message)s')
 
-USERS_DB = 'users.db'
+# Environment variables with defaults
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@localhost/ripplealert")
+REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
 def get_db_connection():
-    conn = sqlite3.connect(USERS_DB, timeout=10)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 def log_alert_history(conn, user_id, symbol, rule_description, triggered_price, timestamp):
-    conn.execute('''
+    cursor = conn.cursor()
+    cursor.execute('''
         INSERT INTO alert_history (user_id, symbol, rule_description, triggered_price, timestamp)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
     ''', (user_id, symbol, rule_description, triggered_price, timestamp))
+    cursor.close()
 
 def check_rules(redis_client, prices_data, timestamp_str):
     conn = get_db_connection()
     try:
-        rules = conn.execute('''
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute('''
             SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, u.email 
             FROM rules r
             JOIN users u ON r.user_id = u.id
-        ''').fetchall()
+        ''')
+        rules = cursor.fetchall()
         
         # Update Redis sorted sets for percent change
         current_ts = datetime.fromisoformat(timestamp_str).timestamp()
@@ -75,13 +83,13 @@ def check_rules(redis_client, prices_data, timestamp_str):
             if condition_met and not is_triggered:
                 # Trigger alert
                 logging.info(f"🚨 ALERT SENT 🚨 To: {email} | {rule_description} (Current: ${current_price})")
-                conn.execute("UPDATE rules SET is_currently_triggered = 1 WHERE id = ?", (rule_id,))
+                cursor.execute("UPDATE rules SET is_currently_triggered = TRUE WHERE id = %s", (rule_id,))
                 log_alert_history(conn, user_id, symbol, rule_description, current_price, timestamp_str)
                 
             elif not condition_met and is_triggered:
                 # Reset alert
                 logging.info(f"🔄 ALERT RESET 🔄 {symbol} condition no longer met. Alert re-armed.")
-                conn.execute("UPDATE rules SET is_currently_triggered = 0 WHERE id = ?", (rule_id,))
+                cursor.execute("UPDATE rules SET is_currently_triggered = FALSE WHERE id = %s", (rule_id,))
                 log_alert_history(conn, user_id, symbol, f"RESET: {symbol} condition no longer met", current_price, timestamp_str)
                 
         # Clean up old data from redis (keep last 24h max)
@@ -89,14 +97,15 @@ def check_rules(redis_client, prices_data, timestamp_str):
             redis_client.zremrangebyscore(f"history:{symbol}", "-inf", current_ts - 86400)
             
         conn.commit()
-    except sqlite3.OperationalError as e:
+        cursor.close()
+    except psycopg2.Error as e:
         logging.error(f"Database error: {e}")
     finally:
         conn.close()
 
 def main():
     logging.info("Starting standalone RippleAlert Alert Engine...")
-    r = redis.Redis(host='127.0.0.1', port=6379, decode_responses=True)
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     pubsub = r.pubsub()
     pubsub.subscribe("prices")
     
