@@ -15,7 +15,10 @@ REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL)
+    db_url = DATABASE_URL
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    conn = psycopg2.connect(db_url)
     return conn
 
 def log_alert_history(conn, user_id, symbol, rule_description, triggered_price, timestamp):

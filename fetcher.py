@@ -19,8 +19,14 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 # Connect to Redis
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
+def get_db_connection():
+    db_url = DATABASE_URL
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    return psycopg2.connect(db_url)
+
 def init_db():
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS prices (
@@ -58,7 +64,7 @@ def process_and_publish(data):
     if not data:
         return
         
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = get_db_connection()
     cursor = conn.cursor()
     timestamp = datetime.utcnow().isoformat()
     prices_update = {}
@@ -96,7 +102,16 @@ def process_and_publish(data):
         conn.close()
 
 def main():
-    init_db()
+    import time
+    max_retries = 5
+    for i in range(max_retries):
+        try:
+            init_db()
+            break
+        except Exception as e:
+            logging.error(f"Could not init DB (attempt {i+1}/{max_retries}): {e}")
+            time.sleep(3)
+            
     logging.info("Starting standalone RippleAlert price fetcher...")
     
     backoff = 10

@@ -83,7 +83,10 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL)
+    db_url = DATABASE_URL
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    conn = psycopg2.connect(db_url)
     return conn
 
 def init_users_db():
@@ -132,10 +135,16 @@ def init_users_db():
     cursor.close()
     conn.close()
 
-try:
-    init_users_db()
-except Exception as e:
-    print(f"Could not initialize DB: {e}")
+import time
+max_retries = 5
+for i in range(max_retries):
+    try:
+        init_users_db()
+        print("Database initialized successfully.")
+        break
+    except Exception as e:
+        print(f"Could not initialize DB (attempt {i+1}/{max_retries}): {e}")
+        time.sleep(3)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
