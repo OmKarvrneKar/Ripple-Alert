@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useLivePrices } from '../hooks/useLivePrices';
 import PriceCard from '../components/PriceCard';
+import AlertManager from '../components/AlertManager';
 import { LogOut, Plus, Wifi, WifiOff, Loader2 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -139,6 +140,9 @@ export default function Dashboard() {
             ))}
           </div>
         )}
+        
+        {/* Alert Management Section */}
+        {!loading && <AlertManager />}
       </div>
     </div>
   );

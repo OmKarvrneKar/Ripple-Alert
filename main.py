@@ -258,6 +258,16 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
     conn.close()
     return {"message": f"Rule created: Alert when {rule.symbol.upper()} is {rule.condition} {rule.threshold}"}
 
+@app.get("/rules")
+def get_rules(current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
+    items = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return {"rules": [dict(item) for item in items]}
+
 @app.get("/alert-history")
 def get_alert_history(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
