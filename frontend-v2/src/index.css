@@ -20,15 +20,21 @@
     color: var(--color-frost);
     font-family: var(--font-body);
   }
+  
+  button, input, select {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-azure focus-visible:ring-offset-2 focus-visible:ring-offset-midnight transition-shadow;
+  }
 }
 
 @layer utilities {
-  .animate-ripple-up {
-    animation: rippleUp 1s ease-out forwards;
-  }
-  
-  .animate-ripple-down {
-    animation: rippleDown 1s ease-out forwards;
+  @media (prefers-reduced-motion: no-preference) {
+    .animate-ripple-up {
+      animation: rippleUp 1s ease-out forwards;
+    }
+    
+    .animate-ripple-down {
+      animation: rippleDown 1s ease-out forwards;
+    }
   }
   
   @keyframes rippleUp {

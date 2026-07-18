@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -347,3 +348,9 @@ def get_price_history(symbol: str, hours: float = 24.0):
         cursor.close()
         conn.close()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+# Serve the React frontend (must be at the end to not override API routes)
+if os.path.exists("frontend-v2/dist"):
+    app.mount("/", StaticFiles(directory="frontend-v2/dist", html=True), name="static")
+elif os.path.exists("frontend"):
+    app.mount("/", StaticFiles(directory="frontend", html=True), name="static")

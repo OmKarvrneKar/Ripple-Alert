@@ -33,7 +33,7 @@ graph TD
 - **Database**: PostgreSQL (`psycopg2-binary`)
 - **Cache/Message Broker**: Redis 7
 - **Security**: JWT Authentication, Bcrypt Password Hashing (`passlib[bcrypt]`)
-- **Frontend**: HTML5, Vanilla JS, CSS3, Chart.js
+- **Frontend**: React, Vite, Tailwind CSS v4, Recharts, Lucide Icons
 - **Infrastructure**: Docker, Docker Compose, GitHub Actions, Render
 
 ## Local Setup (Docker Compose)
@@ -49,7 +49,7 @@ graph TD
    - `alert-engine` (Alert rule processor)
    - `db` (PostgreSQL on port 5432)
    - `redis` (Redis broker on port 6379)
-4. Open `frontend/index.html` in your web browser.
+4. Open your browser and navigate to `http://localhost:8000`. The FastAPI backend natively serves the compiled React production bundle!
 
 ## Running Tests
 
