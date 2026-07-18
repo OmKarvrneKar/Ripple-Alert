@@ -60,16 +60,6 @@
 
         <h3>Alert History</h3>
         <div id="alert-history-container"></div>
-        
-        <h3>Historical Charts</h3>
-        <select id="chart-symbol"></select>
-        <select id="chart-range" onchange="loadChart()">
-            <option value="1">1 Hour</option>
-            <option value="24" selected>24 Hours</option>
-            <option value="168">7 Days</option>
-        </select>
-        <button onclick="loadChart()">Refresh Chart</button>
-        <canvas id="priceChart" width="400" height="200" class="hidden"></canvas>
     </div>
 
     <script>
@@ -79,6 +69,9 @@
         let watchlist = [];
         let ws = null;
         let reconnectTimeout = null;
+        
+        const charts = {};
+        const chartRanges = {};
 
         function updateUI() {
             if (token) {
@@ -87,7 +80,6 @@
                 fetchWatchlist();
                 fetchAlertHistory();
                 connectWebSocket();
-                populateChartSymbols();
             } else {
                 document.getElementById('auth-section').classList.remove('hidden');
                 document.getElementById('app-section').classList.add('hidden');
@@ -122,24 +114,25 @@
                     const data = message.data;
                     const timestamp = message.timestamp;
                     
-                    const container = document.getElementById('prices-container');
-                    let html = "";
                     for (const sym of watchlist) {
                         if (data[sym]) {
-                            html += `<div class="price-box highlight"><strong>${sym}</strong>: $${data[sym]} <br><small style="color:#888;">${new Date(timestamp).toLocaleString()}</small></div>`;
-                        } else {
-                            html += `<div class="price-box"><strong>${sym}</strong>: Waiting for update...</div>`;
+                            const price = data[sym];
+                            updateLivePriceText(sym, price, timestamp);
+                            
+                            // Append to chart if it exists
+                            const chart = charts[sym];
+                            if (chart) {
+                                const dt = new Date(timestamp);
+                                const label = chartRanges[sym] === 168 ? 
+                                    dt.toLocaleString([], {month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'}) :
+                                    dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                
+                                chart.data.labels.push(label);
+                                chart.data.datasets[0].data.push(price);
+                                chart.update('none'); // Update without animation so it feels realtime
+                            }
                         }
                     }
-                    container.innerHTML = html;
-                    
-                    // Remove highlight class after a short delay for a flash effect
-                    setTimeout(() => {
-                        const boxes = container.getElementsByClassName('price-box');
-                        for(let box of boxes) {
-                            box.classList.remove('highlight');
-                        }
-                    }, 500);
                 }
             };
             
@@ -219,15 +212,125 @@
                 if (res.ok) {
                     const data = await res.json();
                     watchlist = data.watchlist;
-                    // Try to fetch initial prices immediately using the existing endpoint
-                    // so the user doesn't have to wait up to 10 seconds for the first WebSocket broadcast
+                    initPriceContainers();
                     fetchInitialPrices();
-                    populateChartSymbols();
                 } else if(res.status === 401) {
                     logout(); // Token expired
                 }
             } catch(e) {
                 console.error("Failed to fetch watchlist", e);
+            }
+        }
+
+        function initPriceContainers() {
+            const container = document.getElementById('prices-container');
+            container.innerHTML = "";
+            
+            // Destroy existing charts
+            Object.keys(charts).forEach(sym => {
+                if (charts[sym]) charts[sym].destroy();
+                delete charts[sym];
+            });
+
+            for (const sym of watchlist) {
+                chartRanges[sym] = 24; // Default to 24h
+
+                const box = document.createElement('div');
+                box.className = 'price-box';
+                box.id = `price-box-${sym}`;
+
+                box.innerHTML = `
+                    <div id="price-text-${sym}"><strong>${sym}</strong>: Waiting for update...</div>
+                    <div style="margin-top: 10px; display: flex; gap: 5px;">
+                        <button style="width: auto; padding: 5px 10px;" onclick="loadChart('${sym}', 1)">1h</button>
+                        <button style="width: auto; padding: 5px 10px;" onclick="loadChart('${sym}', 24)">24h</button>
+                        <button style="width: auto; padding: 5px 10px;" onclick="loadChart('${sym}', 168)">7d</button>
+                    </div>
+                    <canvas id="chart-${sym}"></canvas>
+                `;
+                container.appendChild(box);
+                loadChart(sym, 24);
+            }
+        }
+
+        async function loadChart(sym, hours) {
+            chartRanges[sym] = hours;
+            try {
+                const res = await fetch(`${API_URL}/price-history/${sym}?hours=${hours}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    renderChart(sym, data);
+                }
+            } catch (e) {
+                console.error("Failed to fetch price history", e);
+            }
+        }
+
+        function renderChart(sym, data) {
+            const canvas = document.getElementById(`chart-${sym}`);
+            if(!canvas) return;
+            const ctx = canvas.getContext('2d');
+            
+            const labels = data.data.map(d => {
+                const dt = new Date(d.timestamp);
+                return data.resolution === 'hour' ? 
+                    dt.toLocaleString([], {month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'}) :
+                    dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            });
+            const prices = data.data.map(d => d.price);
+
+            if (charts[sym]) {
+                charts[sym].destroy();
+            }
+
+            charts[sym] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${sym} Price (USD)`,
+                        data: prices,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index',
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateLivePriceText(sym, price, timestamp) {
+            const textEl = document.getElementById(`price-text-${sym}`);
+            const boxEl = document.getElementById(`price-box-${sym}`);
+            if (textEl && boxEl) {
+                textEl.innerHTML = `<strong>${sym}</strong>: $${price} <br><small style="color:#888;">${new Date(timestamp).toLocaleString()}</small>`;
+                boxEl.classList.add('highlight');
+                setTimeout(() => boxEl.classList.remove('highlight'), 500);
+            }
+        }
+
+        async function fetchInitialPrices() {
+            if (!token || watchlist.length === 0) return;
+            for (const sym of watchlist) {
+                try {
+                    const res = await fetch(`${API_URL}/latest-price/${sym}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        updateLivePriceText(sym, data.price, data.timestamp);
+                    }
+                } catch (e) {}
             }
         }
 
@@ -252,32 +355,6 @@
                 }
             } catch(e) {
                 console.error("Failed to fetch alert history", e);
-            }
-        }
-
-        async function fetchInitialPrices() {
-            if (!token || watchlist.length === 0) return;
-            const container = document.getElementById('prices-container');
-            // Only populate if it's currently empty (e.g. WebSocket hasn't fired yet)
-            if (container.innerHTML.trim() !== "") return;
-            
-            let html = "";
-            for (const sym of watchlist) {
-                try {
-                    const res = await fetch(`${API_URL}/latest-price/${sym}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        html += `<div class="price-box"><strong>${data.symbol}</strong>: $${data.price} <br><small style="color:#888;">${new Date(data.timestamp).toLocaleString()}</small></div>`;
-                    } else {
-                        html += `<div class="price-box"><strong>${sym}</strong>: Waiting for live update...</div>`;
-                    }
-                } catch (e) {
-                    html += `<div class="price-box"><strong>${sym}</strong>: Error connecting</div>`;
-                }
-            }
-            // Double check it's still empty before overwriting
-            if (container.innerHTML.trim() === "") {
-                container.innerHTML = html;
             }
         }
 
@@ -343,86 +420,6 @@
             } catch(e) {
                 console.error("Failed to create rule", e);
             }
-        }
-
-        let priceChartObj = null;
-
-        function populateChartSymbols() {
-            const select = document.getElementById('chart-symbol');
-            select.innerHTML = "";
-            if (watchlist.length === 0) {
-                select.innerHTML = "<option value=''>Add symbols to watchlist first</option>";
-                return;
-            }
-            for (const sym of watchlist) {
-                const opt = document.createElement("option");
-                opt.value = sym;
-                opt.textContent = sym;
-                select.appendChild(opt);
-            }
-            // Load chart for first symbol
-            loadChart();
-        }
-
-        async function loadChart() {
-            const symbol = document.getElementById('chart-symbol').value;
-            const hours = document.getElementById('chart-range').value;
-            if (!symbol) return;
-
-            try {
-                const res = await fetch(`${API_URL}/price-history/${symbol}?hours=${hours}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    renderChart(data);
-                }
-            } catch (e) {
-                console.error("Failed to fetch price history", e);
-            }
-        }
-
-        function renderChart(data) {
-            const canvas = document.getElementById('priceChart');
-            canvas.classList.remove('hidden');
-            const ctx = canvas.getContext('2d');
-            
-            const labels = data.data.map(d => {
-                const dt = new Date(d.timestamp);
-                return data.resolution === 'hour' ? 
-                    dt.toLocaleString([], {month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'}) :
-                    dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            });
-            const prices = data.data.map(d => d.price);
-
-            if (priceChartObj) {
-                priceChartObj.destroy();
-            }
-
-            priceChartObj = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: `${data.symbol} Price (USD)`,
-                        data: prices,
-                        borderColor: 'rgb(75, 192, 192)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        tension: 0.1,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    interaction: {
-                        intersect: false,
-                        mode: 'index',
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: false
-                        }
-                    }
-                }
-            });
         }
 
         updateUI();
