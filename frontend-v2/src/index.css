@@ -21,3 +21,43 @@
     font-family: var(--font-body);
   }
 }
+
+@layer utilities {
+  .animate-ripple-up {
+    animation: rippleUp 1s ease-out forwards;
+  }
+  
+  .animate-ripple-down {
+    animation: rippleDown 1s ease-out forwards;
+  }
+  
+  @keyframes rippleUp {
+    0% {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+      background-color: rgba(16, 185, 129, 0.1);
+    }
+    70% {
+      box-shadow: 0 0 0 20px rgba(16, 185, 129, 0);
+      background-color: var(--color-slate-deep);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      background-color: var(--color-slate-deep);
+    }
+  }
+
+  @keyframes rippleDown {
+    0% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+      background-color: rgba(239, 68, 68, 0.1);
+    }
+    70% {
+      box-shadow: 0 0 0 20px rgba(239, 68, 68, 0);
+      background-color: var(--color-slate-deep);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+      background-color: var(--color-slate-deep);
+    }
+  }
+}
