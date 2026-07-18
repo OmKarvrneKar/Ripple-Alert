@@ -16,7 +16,9 @@
         .price-box.highlight { background-color: #e6f7ff; }
         .price-box:last-child { border-bottom: none; }
         #ws-status { font-size: 0.8em; margin-top: 10px; text-align: center; }
+        canvas { background: white; margin-top: 10px; border-radius: 8px; padding: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <h1>RippleAlert</h1>
@@ -58,6 +60,16 @@
 
         <h3>Alert History</h3>
         <div id="alert-history-container"></div>
+        
+        <h3>Historical Charts</h3>
+        <select id="chart-symbol"></select>
+        <select id="chart-range" onchange="loadChart()">
+            <option value="1">1 Hour</option>
+            <option value="24" selected>24 Hours</option>
+            <option value="168">7 Days</option>
+        </select>
+        <button onclick="loadChart()">Refresh Chart</button>
+        <canvas id="priceChart" width="400" height="200" class="hidden"></canvas>
     </div>
 
     <script>
@@ -75,6 +87,7 @@
                 fetchWatchlist();
                 fetchAlertHistory();
                 connectWebSocket();
+                populateChartSymbols();
             } else {
                 document.getElementById('auth-section').classList.remove('hidden');
                 document.getElementById('app-section').classList.add('hidden');
@@ -209,6 +222,7 @@
                     // Try to fetch initial prices immediately using the existing endpoint
                     // so the user doesn't have to wait up to 10 seconds for the first WebSocket broadcast
                     fetchInitialPrices();
+                    populateChartSymbols();
                 } else if(res.status === 401) {
                     logout(); // Token expired
                 }
@@ -329,6 +343,86 @@
             } catch(e) {
                 console.error("Failed to create rule", e);
             }
+        }
+
+        let priceChartObj = null;
+
+        function populateChartSymbols() {
+            const select = document.getElementById('chart-symbol');
+            select.innerHTML = "";
+            if (watchlist.length === 0) {
+                select.innerHTML = "<option value=''>Add symbols to watchlist first</option>";
+                return;
+            }
+            for (const sym of watchlist) {
+                const opt = document.createElement("option");
+                opt.value = sym;
+                opt.textContent = sym;
+                select.appendChild(opt);
+            }
+            // Load chart for first symbol
+            loadChart();
+        }
+
+        async function loadChart() {
+            const symbol = document.getElementById('chart-symbol').value;
+            const hours = document.getElementById('chart-range').value;
+            if (!symbol) return;
+
+            try {
+                const res = await fetch(`${API_URL}/price-history/${symbol}?hours=${hours}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    renderChart(data);
+                }
+            } catch (e) {
+                console.error("Failed to fetch price history", e);
+            }
+        }
+
+        function renderChart(data) {
+            const canvas = document.getElementById('priceChart');
+            canvas.classList.remove('hidden');
+            const ctx = canvas.getContext('2d');
+            
+            const labels = data.data.map(d => {
+                const dt = new Date(d.timestamp);
+                return data.resolution === 'hour' ? 
+                    dt.toLocaleString([], {month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'}) :
+                    dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            });
+            const prices = data.data.map(d => d.price);
+
+            if (priceChartObj) {
+                priceChartObj.destroy();
+            }
+
+            priceChartObj = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${data.symbol} Price (USD)`,
+                        data: prices,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index',
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
         }
 
         updateUI();

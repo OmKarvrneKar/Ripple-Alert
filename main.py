@@ -295,3 +295,45 @@ def get_latest_price(symbol: str):
         cursor.close()
         conn.close()
         raise HTTPException(status_code=404, detail="Database not initialized or price not found")
+
+@app.get("/price-history/{symbol}")
+def get_price_history(symbol: str, hours: float = 24.0):
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Determine downsampling resolution
+        if hours <= 24:
+            trunc_unit = 'minute'
+        else:
+            trunc_unit = 'hour'
+            
+        # We cast the text timestamp to an actual timestamp for time manipulation
+        query = f'''
+            SELECT 
+                date_trunc('{trunc_unit}', CAST(timestamp AS TIMESTAMP)) as time_bucket, 
+                AVG(price) as avg_price 
+            FROM prices 
+            WHERE symbol = %s 
+              AND CAST(timestamp AS TIMESTAMP) >= NOW() - INTERVAL '%s hours'
+            GROUP BY time_bucket
+            ORDER BY time_bucket ASC
+        '''
+        cursor.execute(query, (symbol.upper(), hours))
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        # Format result to be easily consumable by Chart.js or similar
+        return {
+            "symbol": symbol.upper(),
+            "hours": hours,
+            "resolution": trunc_unit,
+            "data": [
+                {"timestamp": row['time_bucket'].isoformat(), "price": round(row['avg_price'], 2)}
+                for row in rows
+            ]
+        }
+    except psycopg2.Error as e:
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
