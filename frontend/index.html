@@ -73,12 +73,14 @@
         const charts = {};
         const chartRanges = {};
 
-        function updateUI() {
+        let alertHistoryGlobal = {};
+
+        async function updateUI() {
             if (token) {
                 document.getElementById('auth-section').classList.add('hidden');
                 document.getElementById('app-section').classList.remove('hidden');
+                await fetchAlertHistory();
                 fetchWatchlist();
-                fetchAlertHistory();
                 connectWebSocket();
             } else {
                 document.getElementById('auth-section').classList.remove('hidden');
@@ -271,8 +273,36 @@
             if(!canvas) return;
             const ctx = canvas.getContext('2d');
             
+            const pointColors = [];
+            const pointRadii = [];
+            const pointStyles = [];
+            
             const labels = data.data.map(d => {
                 const dt = new Date(d.timestamp);
+                const bucketStart = dt.getTime();
+                const bucketEnd = bucketStart + (data.resolution === 'hour' ? 3600000 : 60000);
+                
+                let hasAlert = false;
+                if (alertHistoryGlobal[sym]) {
+                    for (const alert of alertHistoryGlobal[sym]) {
+                        const alertTime = new Date(alert.timestamp).getTime();
+                        if (alertTime >= bucketStart && alertTime < bucketEnd) {
+                            hasAlert = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (hasAlert) {
+                    pointColors.push('red');
+                    pointRadii.push(6);
+                    pointStyles.push('triangle');
+                } else {
+                    pointColors.push('rgba(75, 192, 192, 1)');
+                    pointRadii.push(0);
+                    pointStyles.push('circle');
+                }
+                
                 return data.resolution === 'hour' ? 
                     dt.toLocaleString([], {month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit'}) :
                     dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -292,6 +322,11 @@
                         data: prices,
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        pointBackgroundColor: pointColors,
+                        pointBorderColor: pointColors,
+                        pointRadius: pointRadii,
+                        pointHoverRadius: pointRadii.map(r => r === 0 ? 4 : r + 2),
+                        pointStyle: pointStyles,
                         tension: 0.1,
                         fill: true
                     }]
@@ -342,6 +377,13 @@
                 });
                 if (res.ok) {
                     const data = await res.json();
+                    
+                    alertHistoryGlobal = {};
+                    for (const item of data.history) {
+                        if (!alertHistoryGlobal[item.symbol]) alertHistoryGlobal[item.symbol] = [];
+                        alertHistoryGlobal[item.symbol].push(item);
+                    }
+                    
                     const container = document.getElementById('alert-history-container');
                     if (data.history.length === 0) {
                         container.innerHTML = "<p style='color:#888;'>No alerts triggered yet.</p>";
