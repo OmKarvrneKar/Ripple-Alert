@@ -58,7 +58,7 @@ def evaluate_rule(rule, current_price, current_ts, redis_client):
                 
     return condition_met, rule_description
 
-def check_rules(redis_client, prices_data, timestamp_str):
+def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
     conn = get_db_connection()
     try:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -72,7 +72,7 @@ def check_rules(redis_client, prices_data, timestamp_str):
         # Update Redis sorted sets for percent change
         current_ts = datetime.fromisoformat(timestamp_str).timestamp()
         
-        for symbol, current_price in prices_data.items():
+        for symbol, current_price in recent_prices.items():
             # Add to sorted set (value must be unique, so price_timestamp)
             redis_client.zadd(f"history:{symbol}", {f"{current_price}_{current_ts}": current_ts})
         
@@ -96,12 +96,18 @@ def check_rules(redis_client, prices_data, timestamp_str):
                 if not children:
                     continue
                     
+                # Check if this composite rule is affected by the recent tick
+                affected = any(child['symbol'] in recent_prices for child in children)
+                if not affected:
+                    continue
+                    
                 child_results = []
                 for child in children:
-                    if child['symbol'] not in prices_data:
+                    child_sym = child['symbol']
+                    if child_sym not in global_prices:
                         child_results.append((False, ""))
                     else:
-                        child_results.append(evaluate_rule(child, prices_data[child['symbol']], current_ts, redis_client))
+                        child_results.append(evaluate_rule(child, global_prices[child_sym], current_ts, redis_client))
                 
                 if rule['logic_operator'] == 'AND':
                     condition_met = all(res[0] for res in child_results)
@@ -118,10 +124,10 @@ def check_rules(redis_client, prices_data, timestamp_str):
                 
             else:
                 symbol = rule['symbol']
-                if symbol not in prices_data:
+                if symbol not in recent_prices:
                     continue
                     
-                current_price = prices_data[symbol]
+                current_price = recent_prices[symbol]
                 condition_met, rule_description = evaluate_rule(rule, current_price, current_ts, redis_client)
                 symbol_to_log = symbol
                 price_to_log = current_price
@@ -139,7 +145,7 @@ def check_rules(redis_client, prices_data, timestamp_str):
                 log_alert_history(conn, user_id, symbol_to_log, f"RESET: condition no longer met", price_to_log, timestamp_str)
                 
         # Clean up old data from redis (keep last 24h max)
-        for symbol in prices_data.keys():
+        for symbol in recent_prices.keys():
             redis_client.zremrangebyscore(f"history:{symbol}", "-inf", current_ts - 86400)
             
         conn.commit()
@@ -155,13 +161,16 @@ def main():
     pubsub = r.pubsub()
     pubsub.subscribe("prices")
     
+    global_prices_cache = {}
+    
     for message in pubsub.listen():
         if message["type"] == "message":
             data = json.loads(message["data"])
             prices = data.get("data", {})
             timestamp_str = data.get("timestamp")
             if prices and timestamp_str:
-                check_rules(r, prices, timestamp_str)
+                global_prices_cache.update(prices)
+                check_rules(r, prices, global_prices_cache, timestamp_str)
 
 if __name__ == "__main__":
     while True:
