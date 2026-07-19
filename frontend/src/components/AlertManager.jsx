@@ -18,6 +18,8 @@ export default function AlertManager() {
   
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
   const [error, setError] = useState(null);
 
   const fetchAlertData = async () => {
@@ -46,6 +48,51 @@ export default function AlertManager() {
   useEffect(() => {
     fetchAlertData();
   }, [token]);
+
+  const handleTestRule = async (e) => {
+    e.preventDefault();
+    if (ruleType === 'price' && !symbol) return setError('Symbol is required');
+    if (ruleType === 'portfolio_value' && (!threshold || !condition)) return setError('Condition and threshold are required for portfolio rules');
+    
+    setTesting(true);
+    setError(null);
+    setTestResult(null);
+    
+    const payload = {
+      rule: {
+        rule_type: ruleType,
+        symbol: ruleType === 'price' ? symbol.toUpperCase() : undefined,
+        condition,
+        threshold: parseFloat(threshold),
+        window_minutes: condition === 'percent_change_in_window' ? parseFloat(windowMinutes) : null
+      },
+      days: 7
+    };
+    
+    try {
+      const res = await fetch(`${API_URL}/rules/backtest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setTestResult(data);
+      } else {
+        const data = await res.json();
+        setError(data.detail || 'Failed to backtest rule');
+      }
+    } catch (e) {
+      console.error(e);
+      setError('An error occurred during backtesting');
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const handleCreateRule = async (e) => {
     e.preventDefault();
