@@ -24,6 +24,7 @@ graph TD
 - **Real-Time WebSocket Streaming**: The FastAPI backend instantly pushes live price updates to the frontend via WebSockets, eliminating inefficient HTTP polling.
 - **Redis Pub/Sub Message Broker**: Acts as the central nervous system, decoupling the data fetcher from the API server and alert engine.
 - **Rolling Time-Window Alert Conditions**: Leverages Redis Sorted Sets (`ZADD` / `ZREMRANGEBYSCORE`) to efficiently track historical price caches for complex percentage-change alerts (e.g., "BTC moved > 3% in 60 minutes").
+- **Rule Backtesting**: Users can test their rule configurations against up to 7 days of historical high-resolution price data to see exactly how often it would have triggered before deploying it live.
 - **Multi-Symbol Composite Rules**: Evaluates complex rule trees recursively, allowing cross-asset threshold tracking (e.g., "BTC above $70k AND ETH below $3k").
 - **Portfolio-Based Alerting**: Users can input their live asset holdings, and the engine will efficiently evaluate dynamic rules against their entire aggregated portfolio value.
 - **Alert Cooldown / Snooze**: Prevents alert fatigue by letting users define configurable `cooldown_minutes` per rule, suppressing rapid re-fires in volatile markets.

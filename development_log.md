@@ -81,3 +81,8 @@ This document outlines the step-by-step process used to build, test, and deploy 
 - Created simple keyword-based sentiment analyzer in sentiment_fetcher.py to evaluate bullish/bearish vocabulary instantly with zero API overhead.
 - Created /market-mood/{symbol} endpoint in main.py that aggregates 48h news sentiment into a cohesive market mood signal.
 - Added full test script validation demonstrating proper article parsing and overall mood breakdown mapping.
+
+## Step 13: Backtesting Engine
+- Implemented POST /rules/backtest which securely simulates both absolute thresholds and complex rolling-window percentage rules against real historical PostgreSQL data.
+- Reuses the core idempotent and cooldown throttling logic from the live alert engine to ensure 1:1 accuracy between backtested triggers and future live behavior.
+- Built an interactive UI modal in AlertManager.jsx to dynamically list all historical trigger timestamps and prices for user review.
