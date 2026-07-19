@@ -63,7 +63,7 @@ def check_rules(redis_client, prices_data, timestamp_str):
     try:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute('''
-            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, u.email 
+            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, r.logic_operator, r.parent_rule_id, u.email 
             FROM rules r
             JOIN users u ON r.user_id = u.id
         ''')
@@ -76,30 +76,67 @@ def check_rules(redis_client, prices_data, timestamp_str):
             # Add to sorted set (value must be unique, so price_timestamp)
             redis_client.zadd(f"history:{symbol}", {f"{current_price}_{current_ts}": current_ts})
         
-        for rule in rules:
-            symbol = rule['symbol']
-            if symbol not in prices_data:
-                continue
-                
-            current_price = prices_data[symbol]
+        parent_rules = [r for r in rules if r['parent_rule_id'] is None]
+        child_rules = [r for r in rules if r['parent_rule_id'] is not None]
+        
+        children_by_parent = {}
+        for c in child_rules:
+            if c['parent_rule_id'] not in children_by_parent:
+                children_by_parent[c['parent_rule_id']] = []
+            children_by_parent[c['parent_rule_id']].append(c)
+            
+        for rule in parent_rules:
             is_triggered = bool(rule['is_currently_triggered'])
             rule_id = rule['id']
             user_id = rule['user_id']
             email = rule['email']
             
-            condition_met, rule_description = evaluate_rule(rule, current_price, current_ts, redis_client)
+            if rule['logic_operator']:
+                children = children_by_parent.get(rule_id, [])
+                if not children:
+                    continue
+                    
+                child_results = []
+                for child in children:
+                    if child['symbol'] not in prices_data:
+                        child_results.append((False, ""))
+                    else:
+                        child_results.append(evaluate_rule(child, prices_data[child['symbol']], current_ts, redis_client))
+                
+                if rule['logic_operator'] == 'AND':
+                    condition_met = all(res[0] for res in child_results)
+                    rule_description = " AND ".join([res[1] for res in child_results if res[1]]) if condition_met else ""
+                elif rule['logic_operator'] == 'OR':
+                    condition_met = any(res[0] for res in child_results)
+                    rule_description = " OR ".join([res[1] for res in child_results if res[0]]) if condition_met else ""
+                else:
+                    condition_met = False
+                    rule_description = ""
+                    
+                symbol_to_log = "MULTI"
+                price_to_log = 0.0
+                
+            else:
+                symbol = rule['symbol']
+                if symbol not in prices_data:
+                    continue
+                    
+                current_price = prices_data[symbol]
+                condition_met, rule_description = evaluate_rule(rule, current_price, current_ts, redis_client)
+                symbol_to_log = symbol
+                price_to_log = current_price
                 
             if condition_met and not is_triggered:
                 # Trigger alert
-                logging.info(f"🚨 ALERT SENT 🚨 To: {email} | {rule_description} (Current: ${current_price})")
+                logging.info(f"🚨 ALERT SENT 🚨 To: {email} | {rule_description}")
                 cursor.execute("UPDATE rules SET is_currently_triggered = TRUE WHERE id = %s", (rule_id,))
-                log_alert_history(conn, user_id, symbol, rule_description, current_price, timestamp_str)
+                log_alert_history(conn, user_id, symbol_to_log, rule_description, price_to_log, timestamp_str)
                 
             elif not condition_met and is_triggered:
                 # Reset alert
-                logging.info(f"🔄 ALERT RESET 🔄 {symbol} condition no longer met. Alert re-armed.")
+                logging.info(f"🔄 ALERT RESET 🔄 {symbol_to_log} condition no longer met. Alert re-armed.")
                 cursor.execute("UPDATE rules SET is_currently_triggered = FALSE WHERE id = %s", (rule_id,))
-                log_alert_history(conn, user_id, symbol, f"RESET: {symbol} condition no longer met", current_price, timestamp_str)
+                log_alert_history(conn, user_id, symbol_to_log, f"RESET: condition no longer met", price_to_log, timestamp_str)
                 
         # Clean up old data from redis (keep last 24h max)
         for symbol in prices_data.keys():

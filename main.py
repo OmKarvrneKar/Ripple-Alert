@@ -113,14 +113,29 @@ def init_users_db():
         CREATE TABLE IF NOT EXISTS rules (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
-            condition TEXT NOT NULL,
-            threshold REAL NOT NULL,
+            symbol TEXT,
+            condition TEXT,
+            threshold REAL,
             window_minutes REAL,
             is_currently_triggered BOOLEAN DEFAULT FALSE,
+            logic_operator TEXT,
+            parent_rule_id INTEGER REFERENCES rules(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    
+    # Run migrations for existing DBs
+    try:
+        conn.autocommit = True
+        cursor.execute("ALTER TABLE rules ADD COLUMN logic_operator TEXT;")
+        cursor.execute("ALTER TABLE rules ADD COLUMN parent_rule_id INTEGER REFERENCES rules(id) ON DELETE CASCADE;")
+        cursor.execute("ALTER TABLE rules ALTER COLUMN symbol DROP NOT NULL;")
+        cursor.execute("ALTER TABLE rules ALTER COLUMN condition DROP NOT NULL;")
+        cursor.execute("ALTER TABLE rules ALTER COLUMN threshold DROP NOT NULL;")
+        conn.autocommit = False
+    except psycopg2.Error:
+        pass # Columns probably already exist
+        
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alert_history (
             id SERIAL PRIMARY KEY,
@@ -149,6 +164,8 @@ for i in range(max_retries):
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+from typing import List, Optional
+
 class UserCreate(BaseModel):
     email: str
     password: str
@@ -156,11 +173,22 @@ class UserCreate(BaseModel):
 class WatchlistItem(BaseModel):
     symbol: str
 
-class RuleCreate(BaseModel):
+class RuleCondition(BaseModel):
     symbol: str
     condition: str
     threshold: float
-    window_minutes: float = None
+    window_minutes: Optional[float] = None
+
+class RuleCreate(BaseModel):
+    # For single rules
+    symbol: Optional[str] = None
+    condition: Optional[str] = None
+    threshold: Optional[float] = None
+    window_minutes: Optional[float] = None
+    
+    # For composite rules
+    logic_operator: Optional[str] = None
+    conditions: Optional[List[RuleCondition]] = None
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -243,31 +271,86 @@ def add_to_watchlist(item: WatchlistItem, current_user: dict = Depends(get_curre
 
 @app.post("/rules")
 def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)):
-    if rule.condition not in ["below", "above", "percent_change_in_window"]:
-        raise HTTPException(status_code=400, detail="Invalid condition")
-    if rule.condition == "percent_change_in_window" and not rule.window_minutes:
-        raise HTTPException(status_code=400, detail="window_minutes is required for percent_change_in_window")
-        
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO rules (user_id, symbol, condition, threshold, window_minutes, is_currently_triggered) 
-        VALUES (%s, %s, %s, %s, %s, FALSE)
-    ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold, rule.window_minutes))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return {"message": f"Rule created: Alert when {rule.symbol.upper()} is {rule.condition} {rule.threshold}"}
+    
+    try:
+        if rule.logic_operator:
+            if rule.logic_operator not in ["AND", "OR"]:
+                raise HTTPException(status_code=400, detail="Invalid logic operator")
+            if not rule.conditions or len(rule.conditions) < 2:
+                raise HTTPException(status_code=400, detail="Composite rules need at least 2 conditions")
+                
+            cursor.execute('''
+                INSERT INTO rules (user_id, is_currently_triggered, logic_operator) 
+                VALUES (%s, FALSE, %s) RETURNING id
+            ''', (current_user['id'], rule.logic_operator))
+            parent_id = cursor.fetchone()[0]
+            
+            for cond in rule.conditions:
+                if cond.condition not in ["below", "above", "percent_change_in_window"]:
+                    raise HTTPException(status_code=400, detail="Invalid condition")
+                if cond.condition == "percent_change_in_window" and not cond.window_minutes:
+                    raise HTTPException(status_code=400, detail="window_minutes is required for percent_change_in_window")
+                
+                cursor.execute('''
+                    INSERT INTO rules (user_id, symbol, condition, threshold, window_minutes, parent_rule_id) 
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', (current_user['id'], cond.symbol.upper(), cond.condition, cond.threshold, cond.window_minutes, parent_id))
+                
+            rule_desc = f"Composite Rule ({rule.logic_operator})"
+        else:
+            if not rule.symbol or not rule.condition or rule.threshold is None:
+                raise HTTPException(status_code=400, detail="Missing fields for single rule")
+            if rule.condition not in ["below", "above", "percent_change_in_window"]:
+                raise HTTPException(status_code=400, detail="Invalid condition")
+            if rule.condition == "percent_change_in_window" and not rule.window_minutes:
+                raise HTTPException(status_code=400, detail="window_minutes is required for percent_change_in_window")
+                
+            cursor.execute('''
+                INSERT INTO rules (user_id, symbol, condition, threshold, window_minutes, is_currently_triggered) 
+                VALUES (%s, %s, %s, %s, %s, FALSE)
+            ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold, rule.window_minutes))
+            rule_desc = f"Alert when {rule.symbol.upper()} is {rule.condition} {rule.threshold}"
+            
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cursor.close()
+        conn.close()
+        
+    return {"message": f"Rule created: {rule_desc}"}
 
 @app.get("/rules")
 def get_rules(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
-    items = cursor.fetchall()
+    
+    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered, logic_operator, parent_rule_id FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
+    all_rules = cursor.fetchall()
+    
+    processed_rules = []
+    
+    for r in all_rules:
+        if r['parent_rule_id'] is not None:
+            continue
+            
+        if r['logic_operator'] is not None:
+            children = [dict(c) for c in all_rules if c['parent_rule_id'] == r['id']]
+            processed_rules.append({
+                "id": r['id'],
+                "is_currently_triggered": r['is_currently_triggered'],
+                "logic_operator": r['logic_operator'],
+                "conditions": children
+            })
+        else:
+            processed_rules.append(dict(r))
+            
     cursor.close()
     conn.close()
-    return {"rules": [dict(item) for item in items]}
+    return {"rules": processed_rules}
 
 @app.get("/alert-history")
 def get_alert_history(current_user: dict = Depends(get_current_user)):
