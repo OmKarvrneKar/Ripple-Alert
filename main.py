@@ -154,14 +154,32 @@ def init_users_db():
     except psycopg2.Error:
         pass # Columns probably already exist
         
+    try:
+        conn.autocommit = True
+        cursor.execute("ALTER TABLE rules ADD COLUMN rule_type TEXT DEFAULT 'price';")
+        conn.autocommit = False
+    except psycopg2.Error:
+        pass # Columns probably already exist
+        
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alert_history (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
-            symbol TEXT NOT NULL,
+            symbol TEXT,
             rule_description TEXT NOT NULL,
             triggered_price REAL NOT NULL,
             timestamp TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS portfolio_holdings (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            amount_held REAL NOT NULL,
+            UNIQUE(user_id, symbol),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
