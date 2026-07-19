@@ -187,7 +187,7 @@ class RuleCreate(BaseModel):
     window_minutes: Optional[float] = None
     
     # For composite rules
-    logic_operator: Optional[str] = None
+    logic: Optional[str] = None
     conditions: Optional[List[RuleCondition]] = None
 
 def get_password_hash(password: str) -> str:
@@ -275,8 +275,8 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
     cursor = conn.cursor()
     
     try:
-        if rule.logic_operator:
-            if rule.logic_operator not in ["AND", "OR"]:
+        if rule.logic:
+            if rule.logic not in ["AND", "OR"]:
                 raise HTTPException(status_code=400, detail="Invalid logic operator")
             if not rule.conditions or len(rule.conditions) < 2:
                 raise HTTPException(status_code=400, detail="Composite rules need at least 2 conditions")
@@ -284,7 +284,7 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
             cursor.execute('''
                 INSERT INTO rules (user_id, is_currently_triggered, logic_operator) 
                 VALUES (%s, FALSE, %s) RETURNING id
-            ''', (current_user['id'], rule.logic_operator))
+            ''', (current_user['id'], rule.logic))
             parent_id = cursor.fetchone()[0]
             
             for cond in rule.conditions:
@@ -298,7 +298,7 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 ''', (current_user['id'], cond.symbol.upper(), cond.condition, cond.threshold, cond.window_minutes, parent_id))
                 
-            rule_desc = f"Composite Rule ({rule.logic_operator})"
+            rule_desc = f"Composite Rule ({rule.logic})"
         else:
             if not rule.symbol or not rule.condition or rule.threshold is None:
                 raise HTTPException(status_code=400, detail="Missing fields for single rule")
@@ -342,7 +342,7 @@ def get_rules(current_user: dict = Depends(get_current_user)):
             processed_rules.append({
                 "id": r['id'],
                 "is_currently_triggered": r['is_currently_triggered'],
-                "logic_operator": r['logic_operator'],
+                "logic": r['logic_operator'],
                 "conditions": children
             })
         else:
