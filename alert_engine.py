@@ -162,6 +162,7 @@ def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
                 
             if condition_met and not is_triggered:
                 if in_cooldown:
+                    logging.debug(f"⏳ SKIP ALERT ⏳ Rule {rule_id} for {email} condition met, but in cooldown or snoozed.")
                     continue
                 # Trigger alert
                 logging.info(f"🚨 ALERT SENT 🚨 To: {email} | {rule_description}")
