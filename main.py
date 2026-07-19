@@ -183,6 +183,17 @@ def init_users_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS news_headlines (
+            id SERIAL PRIMARY KEY,
+            headline TEXT NOT NULL,
+            source TEXT NOT NULL,
+            url TEXT UNIQUE,
+            timestamp TIMESTAMP NOT NULL
+        )
+    ''')
+    
     conn.commit()
     cursor.close()
     conn.close()
