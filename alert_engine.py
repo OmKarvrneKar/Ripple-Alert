@@ -63,7 +63,7 @@ def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
     try:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute('''
-            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, r.logic_operator, r.parent_rule_id, u.email 
+            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, r.logic_operator, r.parent_rule_id, r.cooldown_minutes, r.last_triggered_at, u.email 
             FROM rules r
             JOIN users u ON r.user_id = u.id
         ''')
@@ -90,6 +90,20 @@ def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
             rule_id = rule['id']
             user_id = rule['user_id']
             email = rule['email']
+            cooldown_minutes = rule['cooldown_minutes'] or 0
+            last_triggered_at = rule['last_triggered_at']
+            
+            in_cooldown = False
+            if last_triggered_at and cooldown_minutes > 0:
+                if isinstance(last_triggered_at, datetime):
+                    last_ts = last_triggered_at.timestamp()
+                elif isinstance(last_triggered_at, str):
+                    last_ts = datetime.fromisoformat(last_triggered_at).timestamp()
+                else:
+                    last_ts = 0
+                
+                if (current_ts - last_ts) < (cooldown_minutes * 60):
+                    in_cooldown = True
             
             if rule['logic_operator']:
                 children = children_by_parent.get(rule_id, [])
@@ -133,9 +147,11 @@ def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
                 price_to_log = current_price
                 
             if condition_met and not is_triggered:
+                if in_cooldown:
+                    continue
                 # Trigger alert
                 logging.info(f"🚨 ALERT SENT 🚨 To: {email} | {rule_description}")
-                cursor.execute("UPDATE rules SET is_currently_triggered = TRUE WHERE id = %s", (rule_id,))
+                cursor.execute("UPDATE rules SET is_currently_triggered = TRUE, last_triggered_at = to_timestamp(%s) WHERE id = %s", (current_ts, rule_id,))
                 log_alert_history(conn, user_id, symbol_to_log, rule_description, price_to_log, timestamp_str)
                 
             elif not condition_met and is_triggered:

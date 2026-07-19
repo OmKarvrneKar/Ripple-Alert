@@ -120,6 +120,8 @@ def init_users_db():
             is_currently_triggered BOOLEAN DEFAULT FALSE,
             logic_operator TEXT,
             parent_rule_id INTEGER REFERENCES rules(id) ON DELETE CASCADE,
+            cooldown_minutes REAL DEFAULT 0,
+            last_triggered_at TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
@@ -132,6 +134,14 @@ def init_users_db():
         cursor.execute("ALTER TABLE rules ALTER COLUMN symbol DROP NOT NULL;")
         cursor.execute("ALTER TABLE rules ALTER COLUMN condition DROP NOT NULL;")
         cursor.execute("ALTER TABLE rules ALTER COLUMN threshold DROP NOT NULL;")
+        conn.autocommit = False
+    except psycopg2.Error:
+        pass # Columns probably already exist
+        
+    try:
+        conn.autocommit = True
+        cursor.execute("ALTER TABLE rules ADD COLUMN cooldown_minutes REAL DEFAULT 0;")
+        cursor.execute("ALTER TABLE rules ADD COLUMN last_triggered_at TIMESTAMP;")
         conn.autocommit = False
     except psycopg2.Error:
         pass # Columns probably already exist
@@ -189,6 +199,9 @@ class RuleCreate(BaseModel):
     # For composite rules
     logic: Optional[str] = None
     conditions: Optional[List[RuleCondition]] = None
+    
+    # Common
+    cooldown_minutes: Optional[float] = 0
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -282,9 +295,9 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
                 raise HTTPException(status_code=400, detail="Composite rules need at least 2 conditions")
                 
             cursor.execute('''
-                INSERT INTO rules (user_id, is_currently_triggered, logic_operator) 
-                VALUES (%s, FALSE, %s) RETURNING id
-            ''', (current_user['id'], rule.logic))
+                INSERT INTO rules (user_id, is_currently_triggered, logic_operator, cooldown_minutes) 
+                VALUES (%s, FALSE, %s, %s) RETURNING id
+            ''', (current_user['id'], rule.logic, rule.cooldown_minutes))
             parent_id = cursor.fetchone()[0]
             
             for cond in rule.conditions:
@@ -308,9 +321,9 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
                 raise HTTPException(status_code=400, detail="window_minutes is required for percent_change_in_window")
                 
             cursor.execute('''
-                INSERT INTO rules (user_id, symbol, condition, threshold, window_minutes, is_currently_triggered) 
-                VALUES (%s, %s, %s, %s, %s, FALSE)
-            ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold, rule.window_minutes))
+                INSERT INTO rules (user_id, symbol, condition, threshold, window_minutes, is_currently_triggered, cooldown_minutes) 
+                VALUES (%s, %s, %s, %s, %s, FALSE, %s)
+            ''', (current_user['id'], rule.symbol.upper(), rule.condition, rule.threshold, rule.window_minutes, rule.cooldown_minutes))
             rule_desc = f"Alert when {rule.symbol.upper()} is {rule.condition} {rule.threshold}"
             
         conn.commit()
@@ -328,7 +341,7 @@ def get_rules(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
-    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered, logic_operator, parent_rule_id FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
+    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered, logic_operator, parent_rule_id, cooldown_minutes, last_triggered_at FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
     all_rules = cursor.fetchall()
     
     processed_rules = []
@@ -343,6 +356,8 @@ def get_rules(current_user: dict = Depends(get_current_user)):
                 "id": r['id'],
                 "is_currently_triggered": r['is_currently_triggered'],
                 "logic": r['logic_operator'],
+                "cooldown_minutes": r['cooldown_minutes'],
+                "last_triggered_at": r['last_triggered_at'],
                 "conditions": children
             })
         else:
