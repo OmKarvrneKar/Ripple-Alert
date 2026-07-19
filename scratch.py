@@ -17,11 +17,11 @@ def test_composite_rules():
     # "BTC below 60,000 AND ETH below 3,000"
     mock_cursor.fetchall.return_value = [
         # Parent Rule
-        {'id': 1, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'AND', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'email': 'test@test.com'},
+        {'id': 1, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'AND', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
         # Child 1
-        {'id': 2, 'user_id': 1, 'symbol': 'BTC', 'condition': 'below', 'threshold': 60000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 1, 'cooldown_minutes': 0, 'last_triggered_at': None, 'email': 'test@test.com'},
+        {'id': 2, 'user_id': 1, 'symbol': 'BTC', 'condition': 'below', 'threshold': 60000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 1, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
         # Child 2
-        {'id': 3, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 3000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 1, 'cooldown_minutes': 0, 'last_triggered_at': None, 'email': 'test@test.com'},
+        {'id': 3, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 3000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 1, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
     ]
     
     redis_client = MagicMock()
@@ -51,11 +51,11 @@ def test_composite_rules():
     mock_cursor.reset_mock()
     mock_cursor.fetchall.return_value = [
         # Parent Rule
-        {'id': 4, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'OR', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'email': 'test@test.com'},
+        {'id': 4, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'OR', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
         # Child 1
-        {'id': 5, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 70000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 4, 'cooldown_minutes': 0, 'last_triggered_at': None, 'email': 'test@test.com'},
+        {'id': 5, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 70000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 4, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
         # Child 2
-        {'id': 6, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 2000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 4, 'cooldown_minutes': 0, 'last_triggered_at': None, 'email': 'test@test.com'},
+        {'id': 6, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 2000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 4, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
     ]
     
     print("\n--- Testing OR Rule ---")
@@ -84,7 +84,7 @@ def test_composite_rules():
     
     mock_cursor.fetchall.return_value = [
         # Parent Rule (Single condition rule with 5 min cooldown)
-        {'id': 7, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 10000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': None, 'cooldown_minutes': 5, 'last_triggered_at': datetime.datetime.fromtimestamp(ts_triggered), 'email': 'test@test.com'}
+        {'id': 7, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 10000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': None, 'cooldown_minutes': 5, 'last_triggered_at': datetime.datetime.fromtimestamp(ts_triggered), 'snoozed_until': None, 'email': 'test@test.com'}
     ]
     
     print("\n--- Testing Cooldown Rule ---")
@@ -106,6 +106,23 @@ def test_composite_rules():
     assert len(update_calls) == 1
     print("Result: Fired successfully after cooldown! (Correct)")
 
+    # 4. Test Manual Snooze
+    mock_cursor.reset_mock()
+    ts_now_snooze = 1672531200
+    ts_snoozed_until = 1672534800 # Snoozed for 1 hour into the future
+    
+    mock_cursor.fetchall.return_value = [
+        {'id': 8, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 10000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': datetime.datetime.fromtimestamp(ts_snoozed_until), 'email': 'test@test.com'}
+    ]
+    
+    print("\n--- Testing Manual Snooze Rule ---")
+    print("Test 7: Condition met but rule is manually snoozed")
+    ts_str_7 = datetime.datetime.fromtimestamp(ts_now_snooze).isoformat()
+    check_rules(redis_client, recent_prices, global_prices, ts_str_7)
+    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET is_currently_triggered = TRUE" in call[0][0]]
+    assert len(update_calls) == 0
+    print("Result: Did not fire, manually snoozed. (Correct)")
+
 if __name__ == "__main__":
     test_composite_rules()
-    print("\nALL COMPOSITE RULE & COOLDOWN TESTS PASSED!")
+    print("\nALL COMPOSITE RULE, COOLDOWN, & SNOOZE TESTS PASSED!")

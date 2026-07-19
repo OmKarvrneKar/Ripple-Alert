@@ -122,6 +122,7 @@ def init_users_db():
             parent_rule_id INTEGER REFERENCES rules(id) ON DELETE CASCADE,
             cooldown_minutes REAL DEFAULT 0,
             last_triggered_at TIMESTAMP,
+            snoozed_until TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
@@ -142,6 +143,13 @@ def init_users_db():
         conn.autocommit = True
         cursor.execute("ALTER TABLE rules ADD COLUMN cooldown_minutes REAL DEFAULT 0;")
         cursor.execute("ALTER TABLE rules ADD COLUMN last_triggered_at TIMESTAMP;")
+        conn.autocommit = False
+    except psycopg2.Error:
+        pass # Columns probably already exist
+        
+    try:
+        conn.autocommit = True
+        cursor.execute("ALTER TABLE rules ADD COLUMN snoozed_until TIMESTAMP;")
         conn.autocommit = False
     except psycopg2.Error:
         pass # Columns probably already exist
@@ -202,6 +210,9 @@ class RuleCreate(BaseModel):
     
     # Common
     cooldown_minutes: Optional[float] = 0
+
+class SnoozeRequest(BaseModel):
+    duration_minutes: float
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -341,7 +352,7 @@ def get_rules(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
-    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered, logic_operator, parent_rule_id, cooldown_minutes, last_triggered_at FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
+    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered, logic_operator, parent_rule_id, cooldown_minutes, last_triggered_at, snoozed_until FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
     all_rules = cursor.fetchall()
     
     processed_rules = []
@@ -358,6 +369,7 @@ def get_rules(current_user: dict = Depends(get_current_user)):
                 "logic": r['logic_operator'],
                 "cooldown_minutes": r['cooldown_minutes'],
                 "last_triggered_at": r['last_triggered_at'],
+                "snoozed_until": r['snoozed_until'],
                 "conditions": children
             })
         else:
@@ -366,6 +378,39 @@ def get_rules(current_user: dict = Depends(get_current_user)):
     cursor.close()
     conn.close()
     return {"rules": processed_rules}
+
+@app.post("/rules/{rule_id}/snooze")
+def snooze_rule(rule_id: int, request: SnoozeRequest, current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM rules WHERE id = %s AND user_id = %s", (rule_id, current_user['id']))
+    if not cursor.fetchone():
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Rule not found")
+        
+    snooze_until_ts = datetime.utcnow() + timedelta(minutes=request.duration_minutes)
+    cursor.execute("UPDATE rules SET snoozed_until = %s WHERE id = %s", (snooze_until_ts, rule_id))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return {"message": f"Rule {rule_id} snoozed for {request.duration_minutes} minutes"}
+
+@app.delete("/rules/{rule_id}/snooze")
+def cancel_snooze(rule_id: int, current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM rules WHERE id = %s AND user_id = %s", (rule_id, current_user['id']))
+    if not cursor.fetchone():
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Rule not found")
+        
+    cursor.execute("UPDATE rules SET snoozed_until = NULL WHERE id = %s", (rule_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return {"message": f"Snooze cancelled for rule {rule_id}"}
 
 @app.get("/alert-history")
 def get_alert_history(current_user: dict = Depends(get_current_user)):

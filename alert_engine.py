@@ -92,9 +92,23 @@ def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
             email = rule['email']
             cooldown_minutes = rule['cooldown_minutes'] or 0
             last_triggered_at = rule['last_triggered_at']
+            snoozed_until = rule['snoozed_until']
             
             in_cooldown = False
-            if last_triggered_at and cooldown_minutes > 0:
+            
+            # Check manual snooze override
+            if snoozed_until:
+                if isinstance(snoozed_until, datetime):
+                    snooze_ts = snoozed_until.timestamp()
+                elif isinstance(snoozed_until, str):
+                    snooze_ts = datetime.fromisoformat(snoozed_until).timestamp()
+                else:
+                    snooze_ts = 0
+                if current_ts < snooze_ts:
+                    in_cooldown = True
+            
+            # Check automatic cooldown
+            if not in_cooldown and last_triggered_at and cooldown_minutes > 0:
                 if isinstance(last_triggered_at, datetime):
                     last_ts = last_triggered_at.timestamp()
                 elif isinstance(last_triggered_at, str):
