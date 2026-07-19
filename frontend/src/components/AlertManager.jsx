@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { BellRing, CheckCircle2, History, AlertTriangle, Loader2 } from 'lucide-react';
+import { BellRing, CheckCircle2, History, AlertTriangle, Loader2, Clock, XCircle } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -83,6 +83,40 @@ export default function AlertManager() {
       setError("Network error");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleSnooze = async (ruleId) => {
+    try {
+      const res = await fetch(`${API_URL}/rules/${ruleId}/snooze`, {
+        method: 'POST',
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ duration_minutes: 60 })
+      });
+      if (res.ok) {
+        fetchAlertData();
+      }
+    } catch (e) {
+      console.error("Failed to snooze rule", e);
+    }
+  };
+
+  const handleCancelSnooze = async (ruleId) => {
+    try {
+      const res = await fetch(`${API_URL}/rules/${ruleId}/snooze`, {
+        method: 'DELETE',
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        fetchAlertData();
+      }
+    } catch (e) {
+      console.error("Failed to cancel snooze", e);
     }
   };
 
@@ -190,11 +224,36 @@ export default function AlertManager() {
                     <span className="text-xs bg-gray-700 text-steel px-2 py-0.5 rounded-full">IDLE</span>
                   )}
                 </div>
-                <p className="text-sm text-steel">
-                  {rule.condition === 'percent_change_in_window' 
+                <p className="text-sm text-steel mb-3">
+                  {rule.logic ? (
+                    `Composite (${rule.logic}): ` + rule.conditions.map(c => 
+                      c.condition === 'percent_change_in_window' 
+                        ? `${c.symbol} > ${c.threshold}% in ${c.window_minutes}m`
+                        : `${c.symbol} ${c.condition} $${c.threshold}`
+                    ).join(` ${rule.logic} `)
+                  ) : rule.condition === 'percent_change_in_window' 
                     ? `Alert if moves > ${rule.threshold}% in ${rule.window_minutes}m`
                     : `Alert if ${rule.condition} $${rule.threshold}`}
                 </p>
+                <div className="flex items-center justify-end">
+                  {rule.snoozed_until && new Date(rule.snoozed_until) > new Date() ? (
+                    <button 
+                      onClick={() => handleCancelSnooze(rule.id)}
+                      className="text-xs bg-gray-800 hover:bg-gray-700 text-steel px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Cancel Snooze
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => handleSnooze(rule.id)}
+                      className="text-xs bg-azure/10 hover:bg-azure/20 text-azure px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      Snooze 1h
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}
