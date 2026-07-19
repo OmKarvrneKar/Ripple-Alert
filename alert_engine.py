@@ -63,12 +63,22 @@ def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
     try:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute('''
-            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, r.logic_operator, r.parent_rule_id, r.cooldown_minutes, r.last_triggered_at, u.email 
+            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, r.logic_operator, r.parent_rule_id, r.cooldown_minutes, r.last_triggered_at, r.snoozed_until, r.rule_type, u.email 
             FROM rules r
             JOIN users u ON r.user_id = u.id
         ''')
         rules = cursor.fetchall()
         
+        cursor.execute("SELECT user_id, symbol, amount_held FROM portfolio_holdings")
+        holdings_data = cursor.fetchall()
+        
+        portfolio_by_user = {}
+        for h in holdings_data:
+            uid = h['user_id']
+            if uid not in portfolio_by_user:
+                portfolio_by_user[uid] = {}
+            portfolio_by_user[uid][h['symbol']] = h['amount_held']
+            
         # Update Redis sorted sets for percent change
         current_ts = datetime.fromisoformat(timestamp_str).timestamp()
         
@@ -119,7 +129,28 @@ def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
                 if (current_ts - last_ts) < (cooldown_minutes * 60):
                     in_cooldown = True
             
-            if rule['logic_operator']:
+            if rule.get('rule_type') == 'portfolio_value':
+                user_holdings = portfolio_by_user.get(user_id, {})
+                affected = any(sym in recent_prices for sym in user_holdings.keys())
+                if not affected:
+                    continue
+                    
+                total_value = 0.0
+                for sym, amt in user_holdings.items():
+                    price = global_prices.get(sym, 0.0)
+                    total_value += amt * price
+                    
+                condition_met = False
+                if rule['condition'] == 'below' and total_value < rule['threshold']:
+                    condition_met = True
+                elif rule['condition'] == 'above' and total_value > rule['threshold']:
+                    condition_met = True
+                    
+                rule_description = f"Portfolio value {rule['condition']} ${rule['threshold']} (Current: ${total_value:,.2f})" if condition_met else ""
+                symbol_to_log = "PORTFOLIO"
+                price_to_log = total_value
+                
+            elif rule['logic_operator']:
                 children = children_by_parent.get(rule_id, [])
                 if not children:
                     continue

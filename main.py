@@ -221,6 +221,7 @@ class RuleCreate(BaseModel):
     condition: Optional[str] = None
     threshold: Optional[float] = None
     window_minutes: Optional[float] = None
+    rule_type: Optional[str] = 'price'
     
     # For composite rules
     logic: Optional[str] = None
@@ -231,6 +232,10 @@ class RuleCreate(BaseModel):
 
 class SnoozeRequest(BaseModel):
     duration_minutes: float
+
+class PortfolioItem(BaseModel):
+    symbol: str
+    amount: float
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -341,6 +346,14 @@ def create_rule(rule: RuleCreate, current_user: dict = Depends(get_current_user)
                 ''', (current_user['id'], cond.symbol.upper(), cond.condition, cond.threshold, cond.window_minutes, parent_id))
                 
             rule_desc = f"Composite Rule ({rule.logic})"
+        elif rule.rule_type == 'portfolio_value':
+            if not rule.condition or rule.threshold is None:
+                raise HTTPException(status_code=400, detail="Missing fields for portfolio rule")
+            cursor.execute('''
+                INSERT INTO rules (user_id, rule_type, condition, threshold, is_currently_triggered, cooldown_minutes) 
+                VALUES (%s, %s, %s, %s, FALSE, %s)
+            ''', (current_user['id'], rule.rule_type, rule.condition, rule.threshold, rule.cooldown_minutes))
+            rule_desc = f"Alert when Portfolio Value is {rule.condition} ${rule.threshold}"
         else:
             if not rule.symbol or not rule.condition or rule.threshold is None:
                 raise HTTPException(status_code=400, detail="Missing fields for single rule")
@@ -370,7 +383,7 @@ def get_rules(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
-    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered, logic_operator, parent_rule_id, cooldown_minutes, last_triggered_at, snoozed_until FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
+    cursor.execute("SELECT id, symbol, condition, threshold, window_minutes, is_currently_triggered, logic_operator, parent_rule_id, cooldown_minutes, last_triggered_at, snoozed_until, rule_type FROM rules WHERE user_id = %s ORDER BY id DESC", (current_user['id'],))
     all_rules = cursor.fetchall()
     
     processed_rules = []
@@ -449,6 +462,31 @@ def get_watchlist(current_user: dict = Depends(get_current_user)):
     cursor.close()
     conn.close()
     return {"watchlist": [item['symbol'] for item in items]}
+
+@app.get("/portfolio")
+def get_portfolio(current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT symbol, amount_held FROM portfolio_holdings WHERE user_id = %s", (current_user['id'],))
+    items = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return {"portfolio": [dict(item) for item in items]}
+
+@app.post("/portfolio")
+def set_portfolio_item(item: PortfolioItem, current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO portfolio_holdings (user_id, symbol, amount_held) 
+        VALUES (%s, %s, %s) 
+        ON CONFLICT (user_id, symbol) 
+        DO UPDATE SET amount_held = EXCLUDED.amount_held
+    ''', (current_user['id'], item.symbol.upper(), item.amount))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return {"message": f"Portfolio updated: {item.amount} {item.symbol.upper()}"}
 
 @app.get("/latest-price/{symbol}")
 def get_latest_price(symbol: str):
