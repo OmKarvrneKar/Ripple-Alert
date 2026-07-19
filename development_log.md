@@ -76,3 +76,8 @@ This document outlines the step-by-step process used to build, test, and deploy 
 - Upgraded POST /rules to process the new portfolio_value rule type.
 - Implemented PortfolioManager React component to visually track holdings and live total value on the dashboard.
 - Verified full integration with idempotency and cooldown throttle mechanisms.
+
+## Step 12: Sentiment Scoring Layer
+- Created simple keyword-based sentiment analyzer in sentiment_fetcher.py to evaluate bullish/bearish vocabulary instantly with zero API overhead.
+- Created /market-mood/{symbol} endpoint in main.py that aggregates 48h news sentiment into a cohesive market mood signal.
+- Added full test script validation demonstrating proper article parsing and overall mood breakdown mapping.

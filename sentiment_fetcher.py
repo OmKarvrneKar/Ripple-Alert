@@ -18,6 +18,23 @@ def get_db_connection():
     conn = psycopg2.connect(db_url)
     return conn
 
+POSITIVE_WORDS = {'bull', 'bullish', 'surge', 'surges', 'jump', 'jumps', 'soar', 'soars', 'rally', 'rallies', 'up', 'high', 'breakout', 'gain', 'gains', 'adopt', 'adoption', 'approve', 'approves', 'growth', 'pump', 'win'}
+NEGATIVE_WORDS = {'bear', 'bearish', 'drop', 'drops', 'fall', 'falls', 'plunge', 'plunges', 'crash', 'crashes', 'down', 'low', 'dump', 'hack', 'hacked', 'steal', 'stolen', 'ban', 'bans', 'crackdown', 'scam', 'fraud', 'bankrupt', 'bankruptcy', 'sue', 'sues', 'lawsuit', 'lose', 'losses'}
+
+def analyze_sentiment(text):
+    text_lower = text.lower()
+    words = set(text_lower.replace(',', '').replace('.', '').replace('!', '').replace('?', '').replace('-', ' ').split())
+    
+    pos_matches = words.intersection(POSITIVE_WORDS)
+    neg_matches = words.intersection(NEGATIVE_WORDS)
+    
+    if len(pos_matches) > len(neg_matches):
+        return 'positive', f"Positive keywords found: {', '.join(pos_matches)}"
+    elif len(neg_matches) > len(pos_matches):
+        return 'negative', f"Negative keywords found: {', '.join(neg_matches)}"
+    else:
+        return 'neutral', "No strong directional keywords found"
+
 def fetch_and_store_news():
     url = 'https://cointelegraph.com/rss'
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -51,12 +68,13 @@ def fetch_and_store_news():
             except Exception:
                 pub_ts = datetime.utcnow()
                 
+            sentiment_score, sentiment_reason = analyze_sentiment(title)
             try:
                 cursor.execute('''
-                    INSERT INTO news_headlines (headline, source, url, timestamp)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO news_headlines (headline, source, url, timestamp, sentiment_score, sentiment_reason)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (url) DO NOTHING
-                ''', (title, 'Cointelegraph', link, pub_ts))
+                ''', (title, 'Cointelegraph', link, pub_ts, sentiment_score, sentiment_reason))
                 
                 # If rowcount is > 0, it means it was inserted (not conflicting)
                 if cursor.rowcount > 0:

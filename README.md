@@ -27,6 +27,7 @@ graph TD
 - **Multi-Symbol Composite Rules**: Evaluates complex rule trees recursively, allowing cross-asset threshold tracking (e.g., "BTC above $70k AND ETH below $3k").
 - **Portfolio-Based Alerting**: Users can input their live asset holdings, and the engine will efficiently evaluate dynamic rules against their entire aggregated portfolio value.
 - **Alert Cooldown / Snooze**: Prevents alert fatigue by letting users define configurable `cooldown_minutes` per rule, suppressing rapid re-fires in volatile markets.
+- **Real-Time Market Sentiment**: Utilizes a standalone microservice to scrape top-tier crypto news feeds (e.g. Cointelegraph), evaluate headlines using rapid keyword sentiment analysis (Bullish/Bearish), and export aggregated mood scores via API.
 - **Historical Price Charts**: Efficiently queries PostgreSQL using `date_trunc` to downsample large time-series data for fast frontend visualization (via Chart.js), complete with visual alert markers to map triggered rules onto historical trends.
 - **Fully Containerized**: Configured with a comprehensive `docker-compose.yml` orchestrating 5 interconnected containers.
 - **CI/CD via GitHub Actions**: Automated deployment pipelines triggered on every push to the `main` branch.

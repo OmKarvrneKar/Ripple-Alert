@@ -161,6 +161,14 @@ def init_users_db():
     except psycopg2.Error:
         pass # Columns probably already exist
         
+    try:
+        conn.autocommit = True
+        cursor.execute("ALTER TABLE news_headlines ADD COLUMN sentiment_score TEXT DEFAULT 'neutral';")
+        cursor.execute("ALTER TABLE news_headlines ADD COLUMN sentiment_reason TEXT;")
+        conn.autocommit = False
+    except psycopg2.Error:
+        pass # Columns probably already exist
+        
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alert_history (
             id SERIAL PRIMARY KEY,
@@ -190,7 +198,9 @@ def init_users_db():
             headline TEXT NOT NULL,
             source TEXT NOT NULL,
             url TEXT UNIQUE,
-            timestamp TIMESTAMP NOT NULL
+            timestamp TIMESTAMP NOT NULL,
+            sentiment_score TEXT DEFAULT 'neutral',
+            sentiment_reason TEXT
         )
     ''')
     
@@ -498,6 +508,41 @@ def set_portfolio_item(item: PortfolioItem, current_user: dict = Depends(get_cur
     cursor.close()
     conn.close()
     return {"message": f"Portfolio updated: {item.amount} {item.symbol.upper()}"}
+
+@app.get("/market-mood/{symbol}")
+def get_market_mood(symbol: str):
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # Fetch recent headlines containing symbol
+    cursor.execute('''
+        SELECT headline, source, url, timestamp, sentiment_score, sentiment_reason
+        FROM news_headlines
+        WHERE upper(headline) LIKE %s
+        ORDER BY timestamp DESC LIMIT 20
+    ''', (f"%{symbol.upper()}%",))
+    headlines = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    if not headlines:
+        return {"symbol": symbol.upper(), "overall_mood": "neutral", "score_breakdown": {"positive": 0, "negative": 0, "neutral": 0}, "headlines": []}
+        
+    pos = sum(1 for h in headlines if h['sentiment_score'] == 'positive')
+    neg = sum(1 for h in headlines if h['sentiment_score'] == 'negative')
+    neu = len(headlines) - pos - neg
+    
+    overall_mood = "neutral"
+    if pos > neg:
+        overall_mood = "bullish"
+    elif neg > pos:
+        overall_mood = "bearish"
+        
+    return {
+        "symbol": symbol.upper(),
+        "overall_mood": overall_mood,
+        "score_breakdown": {"positive": pos, "negative": neg, "neutral": neu},
+        "headlines": [dict(h) for h in headlines]
+    }
 
 @app.get("/latest-price/{symbol}")
 def get_latest_price(symbol: str):
