@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useLivePrices } from '../hooks/useLivePrices';
 import PriceCard from '../components/PriceCard';
 import AlertManager from '../components/AlertManager';
+import PortfolioManager from '../components/PortfolioManager';
 import { LogOut, Plus, Wifi, WifiOff, Loader2 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -140,6 +141,9 @@ export default function Dashboard() {
             ))}
           </div>
         )}
+        
+        {/* Portfolio Management Section */}
+        {!loading && <PortfolioManager />}
         
         {/* Alert Management Section */}
         {!loading && <AlertManager />}

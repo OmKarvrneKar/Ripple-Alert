@@ -14,6 +14,7 @@ export default function AlertManager() {
   const [condition, setCondition] = useState('above');
   const [threshold, setThreshold] = useState('');
   const [windowMinutes, setWindowMinutes] = useState('');
+  const [ruleType, setRuleType] = useState('price');
   
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -55,7 +56,8 @@ export default function AlertManager() {
     setError(null);
     
     const payload = {
-      symbol: symbol.toUpperCase(),
+      rule_type: ruleType,
+      symbol: ruleType === 'price' ? symbol.toUpperCase() : undefined,
       condition,
       threshold: parseFloat(threshold),
       window_minutes: condition === 'percent_change_in_window' ? parseFloat(windowMinutes) : null
@@ -137,15 +139,34 @@ export default function AlertManager() {
 
         <form onSubmit={handleCreateRule} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-steel mb-1">Symbol</label>
-            <input 
-              type="text" 
-              value={symbol}
-              onChange={e => setSymbol(e.target.value)}
-              className="w-full bg-midnight border border-gray-700 rounded-lg p-2.5 text-frost focus:ring-1 focus:ring-azure outline-none transition-all uppercase"
-              placeholder="BTC"
-            />
+            <label className="block text-sm font-medium text-steel mb-1">Rule Type</label>
+            <select 
+              value={ruleType}
+              onChange={e => {
+                setRuleType(e.target.value);
+                if (e.target.value === 'portfolio_value' && condition === 'percent_change_in_window') {
+                  setCondition('below');
+                }
+              }}
+              className="w-full bg-midnight border border-gray-700 rounded-lg p-2.5 text-frost focus:ring-1 focus:ring-azure outline-none transition-all appearance-none"
+            >
+              <option value="price">Single Asset Price</option>
+              <option value="portfolio_value">Total Portfolio Value</option>
+            </select>
           </div>
+
+          {ruleType === 'price' && (
+            <div>
+              <label className="block text-sm font-medium text-steel mb-1">Symbol</label>
+              <input 
+                type="text" 
+                value={symbol}
+                onChange={e => setSymbol(e.target.value)}
+                className="w-full bg-midnight border border-gray-700 rounded-lg p-2.5 text-frost focus:ring-1 focus:ring-azure outline-none transition-all uppercase"
+                placeholder="BTC"
+              />
+            </div>
+          )}
           
           <div>
             <label className="block text-sm font-medium text-steel mb-1">Condition</label>
@@ -154,9 +175,9 @@ export default function AlertManager() {
               onChange={e => setCondition(e.target.value)}
               className="w-full bg-midnight border border-gray-700 rounded-lg p-2.5 text-frost focus:ring-1 focus:ring-azure outline-none transition-all appearance-none"
             >
-              <option value="above">Above Price ($)</option>
-              <option value="below">Below Price ($)</option>
-              <option value="percent_change_in_window">Percent Change (%)</option>
+              <option value="above">Above Value ($)</option>
+              <option value="below">Below Value ($)</option>
+              {ruleType === 'price' && <option value="percent_change_in_window">Percent Change (%)</option>}
             </select>
           </div>
           
@@ -215,7 +236,9 @@ export default function AlertManager() {
             rules.map(rule => (
               <div key={rule.id} className={`p-4 rounded-lg border ${rule.is_currently_triggered ? 'border-crimson/50 bg-crimson/10' : 'border-gray-700 bg-midnight'}`}>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-frost">{rule.symbol}</span>
+                  <span className="font-bold text-frost">
+                    {rule.rule_type === 'portfolio_value' ? 'PORTFOLIO' : rule.symbol}
+                  </span>
                   {rule.is_currently_triggered ? (
                     <span className="text-xs bg-crimson text-white px-2 py-0.5 rounded-full flex items-center gap-1 font-bold">
                       <AlertTriangle className="w-3 h-3" /> TRIGGERED
