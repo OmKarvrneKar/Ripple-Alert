@@ -70,3 +70,9 @@ This document outlines the step-by-step process used to build, test, and deploy 
   - **API Schema Update**: Overhauled the `RuleCreate` API schema and `POST /rules` to accept the new cooldown attribute. Extracted it into the `GET /rules` payload.
   - **Engine Throttling**: Upgraded `alert_engine.py` to calculate time deltas against `last_triggered_at`. The engine suppresses alert processing if `condition_met` is true but the rule hasn't surpassed its user-defined cooldown threshold.
   - **Test Coverage**: Added simulation cases to `scratch.py` validating that triggers correctly fail when inside the cooldown window but succeed once the time delta surpasses it.
+## Step 11: Portfolio-Based Alerts
+- Added portfolio_holdings table to securely store user asset amounts.
+- Overhauled lert_engine.py to calculate dynamic total portfolio valuations whenever held assets update.
+- Upgraded POST /rules to process the new portfolio_value rule type.
+- Implemented PortfolioManager React component to visually track holdings and live total value on the dashboard.
+- Verified full integration with idempotency and cooldown throttle mechanisms.
