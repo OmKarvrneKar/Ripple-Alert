@@ -54,3 +54,11 @@ This document outlines the step-by-step process used to build, test, and deploy 
   - **Dependency Pinning**: Diagnosed a 500 Internal Server Error in `/login`. Discovered `passlib` broke due to an API change in `bcrypt` v4.1+. Fixed by pinning `bcrypt==4.0.1`.
   - **Missing Dependencies**: Fixed a runtime crash due to missing `python-multipart` required by FastAPI's `OAuth2PasswordRequestForm`.
   - **End-to-End Testing**: Validated the fully containerized system using an automated `test_docker.py` script that tests signup, WebSockets, rule insertion, and Alert History population.
+
+## Step 9: Composite (Multi-Condition) Rules
+- **Action**: Extended the rules system to support `AND`/`OR` grouping across multiple symbols.
+- **Details**:
+  - **Database Redesign**: Safely migrated the `rules` table schema by dropping base column `NOT NULL` constraints and adding recursive `logic_operator` and `parent_rule_id` foreign keys, maintaining 100% backward compatibility for single-condition rules via a tree structure.
+  - **API Upgrades**: Overhauled `POST /rules` to accept a `"logic": "AND"` key and dynamically insert child condition rows, while updating `GET /rules` to recursively group and hydrate rule conditions back to the frontend in a clean JSON format.
+  - **Alert Engine Caching**: Modified the `alert_engine.py` processing loop to maintain an active in-memory `global_prices_cache`. This solved the Redis pub/sub isolated-tick limitation, allowing the engine to successfully evaluate multi-symbol rules (e.g., `BTC < 60k AND ETH < 3k`) simultaneously whenever either relevant asset ticks.
+  - **Idempotency Preserved**: Validated via rigorous test scripts that `is_currently_triggered` flags properly isolate composite evaluations to prevent spam alerts while triggering accurately across `AND`/`OR` conditions.
