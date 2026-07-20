@@ -54,3 +54,35 @@ This document outlines the step-by-step process used to build, test, and deploy 
   - **Dependency Pinning**: Diagnosed a 500 Internal Server Error in `/login`. Discovered `passlib` broke due to an API change in `bcrypt` v4.1+. Fixed by pinning `bcrypt==4.0.1`.
   - **Missing Dependencies**: Fixed a runtime crash due to missing `python-multipart` required by FastAPI's `OAuth2PasswordRequestForm`.
   - **End-to-End Testing**: Validated the fully containerized system using an automated `test_docker.py` script that tests signup, WebSockets, rule insertion, and Alert History population.
+
+## Step 9: Composite (Multi-Condition) Rules
+- **Action**: Extended the rules system to support `AND`/`OR` grouping across multiple symbols.
+- **Details**:
+  - **Database Redesign**: Safely migrated the `rules` table schema by dropping base column `NOT NULL` constraints and adding recursive `logic_operator` and `parent_rule_id` foreign keys, maintaining 100% backward compatibility for single-condition rules via a tree structure.
+  - **API Upgrades**: Overhauled `POST /rules` to accept a `"logic": "AND"` key and dynamically insert child condition rows, while updating `GET /rules` to recursively group and hydrate rule conditions back to the frontend in a clean JSON format.
+  - **Alert Engine Caching**: Modified the `alert_engine.py` processing loop to maintain an active in-memory `global_prices_cache`. This solved the Redis pub/sub isolated-tick limitation, allowing the engine to successfully evaluate multi-symbol rules (e.g., `BTC < 60k AND ETH < 3k`) simultaneously whenever either relevant asset ticks.
+  - **Idempotency Preserved**: Validated via rigorous test scripts that `is_currently_triggered` flags properly isolate composite evaluations to prevent spam alerts while triggering accurately across `AND`/`OR` conditions.
+
+## Step 10: Alert Cooldowns / Snooze Feature
+- **Action**: Extended rules to support a configurable cooldown/snooze period preventing alert fatigue.
+- **Details**:
+  - **Database Expansion**: Altered the `rules` table to add `cooldown_minutes` (default 0) and `last_triggered_at` (TIMESTAMP).
+  - **API Schema Update**: Overhauled the `RuleCreate` API schema and `POST /rules` to accept the new cooldown attribute. Extracted it into the `GET /rules` payload.
+  - **Engine Throttling**: Upgraded `alert_engine.py` to calculate time deltas against `last_triggered_at`. The engine suppresses alert processing if `condition_met` is true but the rule hasn't surpassed its user-defined cooldown threshold.
+  - **Test Coverage**: Added simulation cases to `scratch.py` validating that triggers correctly fail when inside the cooldown window but succeed once the time delta surpasses it.
+## Step 11: Portfolio-Based Alerts
+- Added portfolio_holdings table to securely store user asset amounts.
+- Overhauled lert_engine.py to calculate dynamic total portfolio valuations whenever held assets update.
+- Upgraded POST /rules to process the new portfolio_value rule type.
+- Implemented PortfolioManager React component to visually track holdings and live total value on the dashboard.
+- Verified full integration with idempotency and cooldown throttle mechanisms.
+
+## Step 12: Sentiment Scoring Layer
+- Created simple keyword-based sentiment analyzer in sentiment_fetcher.py to evaluate bullish/bearish vocabulary instantly with zero API overhead.
+- Created /market-mood/{symbol} endpoint in main.py that aggregates 48h news sentiment into a cohesive market mood signal.
+- Added full test script validation demonstrating proper article parsing and overall mood breakdown mapping.
+
+## Step 13: Backtesting Engine
+- Implemented POST /rules/backtest which securely simulates both absolute thresholds and complex rolling-window percentage rules against real historical PostgreSQL data.
+- Reuses the core idempotent and cooldown throttling logic from the live alert engine to ensure 1:1 accuracy between backtested triggers and future live behavior.
+- Built an interactive UI modal in AlertManager.jsx to dynamically list all historical trigger timestamps and prices for user review.

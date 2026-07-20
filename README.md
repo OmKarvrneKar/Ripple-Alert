@@ -24,6 +24,12 @@ graph TD
 - **Real-Time WebSocket Streaming**: The FastAPI backend instantly pushes live price updates to the frontend via WebSockets, eliminating inefficient HTTP polling.
 - **Redis Pub/Sub Message Broker**: Acts as the central nervous system, decoupling the data fetcher from the API server and alert engine.
 - **Rolling Time-Window Alert Conditions**: Leverages Redis Sorted Sets (`ZADD` / `ZREMRANGEBYSCORE`) to efficiently track historical price caches for complex percentage-change alerts (e.g., "BTC moved > 3% in 60 minutes").
+- **Rule Backtesting**: Users can test their rule configurations against up to 7 days of historical high-resolution price data to see exactly how often it would have triggered before deploying it live.
+- **Multi-Symbol Composite Rules**: Evaluates complex rule trees recursively, allowing cross-asset threshold tracking (e.g., "BTC above $70k AND ETH below $3k").
+- **Portfolio-Based Alerting**: Users can input their live asset holdings, and the engine will efficiently evaluate dynamic rules against their entire aggregated portfolio value.
+- **Alert Cooldown / Snooze**: Prevents alert fatigue by letting users define configurable `cooldown_minutes` per rule, suppressing rapid re-fires in volatile markets.
+- **Real-Time Market Sentiment**: Utilizes a standalone microservice to scrape top-tier crypto news feeds (e.g. Cointelegraph), evaluate headlines using rapid keyword sentiment analysis (Bullish/Bearish), and export aggregated mood scores via API.
+- **Historical Price Charts**: Efficiently queries PostgreSQL using `date_trunc` to downsample large time-series data for fast frontend visualization (via Chart.js), complete with visual alert markers to map triggered rules onto historical trends.
 - **Fully Containerized**: Configured with a comprehensive `docker-compose.yml` orchestrating 5 interconnected containers.
 - **CI/CD via GitHub Actions**: Automated deployment pipelines triggered on every push to the `main` branch.
 
@@ -32,7 +38,7 @@ graph TD
 - **Database**: PostgreSQL (`psycopg2-binary`)
 - **Cache/Message Broker**: Redis 7
 - **Security**: JWT Authentication, Bcrypt Password Hashing (`passlib[bcrypt]`)
-- **Frontend**: HTML5, Vanilla JS, CSS3, Chart.js
+- **Frontend**: React, Vite, Tailwind CSS v4, Recharts, Lucide Icons
 - **Infrastructure**: Docker, Docker Compose, GitHub Actions, Render
 
 ## Local Setup (Docker Compose)
@@ -48,10 +54,22 @@ graph TD
    - `alert-engine` (Alert rule processor)
    - `db` (PostgreSQL on port 5432)
    - `redis` (Redis broker on port 6379)
-4. Open `frontend/index.html` in your web browser.
+4. Open your browser and navigate to `http://localhost:8000`. The FastAPI backend natively serves the compiled React production bundle!
+
+## Running Tests
+
+This project features a fully automated `pytest` suite testing all asynchronous endpoints, WebSocket structures, and core alert engine logic. The suite relies on the `db` service. To run it:
+
+1. Ensure the core database and Redis are running:
+   ```bash
+   docker-compose up -d db redis
+   ```
+2. Run pytest inside the web container:
+   ```bash
+   docker-compose run --rm web /bin/sh -c "pip install -r requirements-dev.txt && pytest"
+   ```
 
 ## What I'd Improve Next
-- **Add Automated Tests**: Implement `pytest` suites to rigorously test API endpoints and alert engine edge cases.
 - **Support More Asset Types**: Expand the fetcher to pull a wider variety of cryptocurrencies or traditional stocks.
 - **Add Push Notifications**: Integrate SendGrid or Twilio to send actual SMS/Email alerts when a rule fires, rather than just logging it in the database.
 - **Frontend Framework**: Migrate the vanilla frontend to React or Next.js for better state management and component reusability.
