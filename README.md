@@ -30,7 +30,7 @@ graph TD
 - **Alert Cooldown / Snooze**: Prevents alert fatigue by letting users define configurable `cooldown_minutes` per rule, suppressing rapid re-fires in volatile markets.
 - **Real-Time Market Sentiment**: Utilizes a standalone microservice to scrape top-tier crypto news feeds (e.g. Cointelegraph), evaluate headlines using rapid keyword sentiment analysis (Bullish/Bearish), and export aggregated mood scores via API.
 - **Historical Price Charts**: Efficiently queries PostgreSQL using `date_trunc` to downsample large time-series data for fast frontend visualization (via Chart.js), complete with visual alert markers to map triggered rules onto historical trends.
-- **Fully Containerized**: Configured with a comprehensive `docker-compose.yml` orchestrating 5 interconnected containers.
+- **Fully Containerized**: Configured with a comprehensive `docker-compose.yml` orchestrating 6 interconnected containers.
 - **CI/CD via GitHub Actions**: Automated deployment pipelines triggered on every push to the `main` branch.
 
 ## Tech Stack
@@ -52,6 +52,7 @@ graph TD
    - `web` (FastAPI backend on port 8000)
    - `worker` (Standalone fetcher process)
    - `alert-engine` (Alert rule processor)
+   - `sentiment-fetcher` (Crypto news sentiment analyzer)
    - `db` (PostgreSQL on port 5432)
    - `redis` (Redis broker on port 6379)
 4. Open your browser and navigate to `http://localhost:8000`. The FastAPI backend natively serves the compiled React production bundle!
@@ -72,4 +73,3 @@ This project features a fully automated `pytest` suite testing all asynchronous 
 ## What I'd Improve Next
 - **Support More Asset Types**: Expand the fetcher to pull a wider variety of cryptocurrencies or traditional stocks.
 - **Add Push Notifications**: Integrate SendGrid or Twilio to send actual SMS/Email alerts when a rule fires, rather than just logging it in the database.
-- **Frontend Framework**: Migrate the vanilla frontend to React or Next.js for better state management and component reusability.
