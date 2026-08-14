@@ -1,21 +1,19 @@
-import os
-from unittest.mock import MagicMock
-from alert_engine import check_rules
+import sys
 
-# Mock the get_db_connection function in alert_engine
-import alert_engine
-import datetime
+with open('e:/Application/RippleAlert/scratch.py', 'r', encoding='utf-8') as f:
+    content = f.read()
 
-def test_composite_rules():
-    # Setup mock DB connection
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value = mock_cursor
-    alert_engine.get_db_connection = lambda: mock_conn
+# I will replace the mock_cursor.fetchall.return_value with mock_cursor.fetchall.side_effect
+old_test = '''    mock_cursor.fetchall.return_value = [
+        # Parent Rule
+        {'id': 1, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'AND', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
+        # Child 1
+        {'id': 2, 'user_id': 1, 'symbol': 'BTC', 'condition': 'below', 'threshold': 60000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 1, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
+        # Child 2
+        {'id': 3, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 3000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 1, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
+    ]'''
 
-    # 1. Test AND Rule
-    # "BTC below 60,000 AND ETH below 3,000"
-    mock_cursor.fetchall.side_effect = [
+new_test = '''    mock_cursor.fetchall.side_effect = [
         [
             # Parent Rule
             {'id': 1, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'AND', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'rule_type': 'price', 'email': 'test@test.com'},
@@ -25,34 +23,20 @@ def test_composite_rules():
             {'id': 3, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 3000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 1, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'rule_type': 'price', 'email': 'test@test.com'},
         ],
         [] # Empty holdings
-    ]
-    
-    redis_client = MagicMock()
-    ts_str = "2026-07-19T22:00:00"
+    ]'''
 
-    print("--- Testing AND Rule ---")
-    print("Test 1: Only BTC is below 60,000 (ETH is 3500)")
-    recent_prices = {"BTC": 59000}
-    global_prices = {"BTC": 59000, "ETH": 3500}
-    check_rules(redis_client, recent_prices, global_prices, ts_str)
-    # Shouldn't trigger (execute count on UPDATE should be 0)
-    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET" in call[0][0]]
-    assert len(update_calls) == 0
-    print("Result: Did not fire. (Correct)")
-    
-    print("\nTest 2: Both BTC and ETH are below thresholds")
-    mock_cursor.execute.reset_mock()
-    recent_prices = {"ETH": 2900}
-    global_prices = {"BTC": 59000, "ETH": 2900}
-    check_rules(redis_client, recent_prices, global_prices, ts_str)
-    # Should trigger
-    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET is_currently_triggered = TRUE" in call[0][0]]
-    assert len(update_calls) == 1
-    print("Result: Fired successfully! (Correct)")
-    
-    # 2. Test OR Rule
-    mock_cursor.reset_mock()
-    mock_cursor.fetchall.side_effect = [
+content = content.replace(old_test, new_test)
+
+old_test_2 = '''    mock_cursor.fetchall.return_value = [
+        # Parent Rule
+        {'id': 4, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'OR', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
+        # Child 1
+        {'id': 5, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 70000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 4, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
+        # Child 2
+        {'id': 6, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 2000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 4, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'email': 'test@test.com'},
+    ]'''
+
+new_test_2 = '''    mock_cursor.fetchall.side_effect = [
         [
             # Parent Rule
             {'id': 4, 'user_id': 1, 'symbol': None, 'condition': None, 'threshold': None, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': 'OR', 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'rule_type': 'price', 'email': 'test@test.com'},
@@ -62,82 +46,39 @@ def test_composite_rules():
             {'id': 6, 'user_id': 1, 'symbol': 'ETH', 'condition': 'below', 'threshold': 2000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': 4, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': None, 'rule_type': 'price', 'email': 'test@test.com'},
         ],
         [] # Empty holdings
-    ]
-    
-    print("\n--- Testing OR Rule ---")
-    print("Test 3: Neither condition met")
-    mock_cursor.execute.reset_mock()
-    recent_prices = {"BTC": 65000}
-    global_prices = {"BTC": 65000, "ETH": 2500}
-    check_rules(redis_client, recent_prices, global_prices, ts_str)
-    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET" in call[0][0]]
-    assert len(update_calls) == 0
-    print("Result: Did not fire. (Correct)")
-    
-    print("\nTest 4: One condition met (BTC > 70k)")
-    mock_cursor.execute.reset_mock()
-    recent_prices = {"BTC": 71000}
-    global_prices = {"BTC": 71000, "ETH": 2500}
-    check_rules(redis_client, recent_prices, global_prices, ts_str)
-    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET is_currently_triggered = TRUE" in call[0][0]]
-    assert len(update_calls) == 1
-    print("Result: Fired successfully! (Correct)")
+    ]'''
 
-    # 3. Test Cooldown Rule
-    mock_cursor.reset_mock()
-    ts_now = 1672531200 # Jan 1 2023, 00:00:00
-    ts_triggered = 1672531000 # 200 seconds ago (3.33 mins)
-    
-    mock_cursor.fetchall.side_effect = [
+content = content.replace(old_test_2, new_test_2)
+
+old_test_3 = '''    mock_cursor.fetchall.return_value = [
+        # Parent Rule (Single condition rule with 5 min cooldown)
+        {'id': 7, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 10000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': None, 'cooldown_minutes': 5, 'last_triggered_at': datetime.datetime.fromtimestamp(ts_triggered), 'snoozed_until': None, 'email': 'test@test.com'}
+    ]'''
+
+new_test_3 = '''    mock_cursor.fetchall.side_effect = [
         [
             # Parent Rule (Single condition rule with 5 min cooldown)
             {'id': 7, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 10000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': None, 'cooldown_minutes': 5, 'last_triggered_at': datetime.datetime.fromtimestamp(ts_triggered), 'snoozed_until': None, 'rule_type': 'price', 'email': 'test@test.com'}
         ],
         []
-    ]
-    
-    print("\n--- Testing Cooldown Rule ---")
-    print("Test 5: Condition met but inside 5m cooldown (200s elapsed)")
-    ts_str_5 = datetime.datetime.fromtimestamp(ts_now).isoformat()
-    recent_prices = {"BTC": 11000}
-    global_prices = {"BTC": 11000}
-    check_rules(redis_client, recent_prices, global_prices, ts_str_5)
-    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET is_currently_triggered = TRUE" in call[0][0]]
-    assert len(update_calls) == 0
-    print("Result: Did not fire, in cooldown. (Correct)")
-    
-    print("\nTest 6: Condition met and outside 5m cooldown (400s elapsed)")
-    mock_cursor.execute.reset_mock()
-    ts_now_later = ts_triggered + 400
-    ts_str_6 = datetime.datetime.fromtimestamp(ts_now_later).isoformat()
-    check_rules(redis_client, recent_prices, global_prices, ts_str_6)
-    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET is_currently_triggered = TRUE" in call[0][0]]
-    assert len(update_calls) == 1
-    print("Result: Fired successfully after cooldown! (Correct)")
+    ]'''
 
-    # 4. Test Manual Snooze
-    mock_cursor.reset_mock()
-    ts_now_snooze = 1672531200
-    ts_snoozed_until = 1672534800 # Snoozed for 1 hour into the future
-    
-    mock_cursor.fetchall.side_effect = [
+content = content.replace(old_test_3, new_test_3)
+
+old_test_4 = '''    mock_cursor.fetchall.return_value = [
+        {'id': 8, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 10000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': datetime.datetime.fromtimestamp(ts_snoozed_until), 'email': 'test@test.com'}
+    ]'''
+
+new_test_4 = '''    mock_cursor.fetchall.side_effect = [
         [
             {'id': 8, 'user_id': 1, 'symbol': 'BTC', 'condition': 'above', 'threshold': 10000, 'window_minutes': None, 'is_currently_triggered': False, 'logic_operator': None, 'parent_rule_id': None, 'cooldown_minutes': 0, 'last_triggered_at': None, 'snoozed_until': datetime.datetime.fromtimestamp(ts_snoozed_until), 'rule_type': 'price', 'email': 'test@test.com'}
         ],
         []
-    ]
-    
-    print("\n--- Testing Manual Snooze Rule ---")
-    print("Test 7: Condition met but rule is manually snoozed")
-    ts_str_7 = datetime.datetime.fromtimestamp(ts_now_snooze).isoformat()
-    check_rules(redis_client, recent_prices, global_prices, ts_str_7)
-    update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET is_currently_triggered = TRUE" in call[0][0]]
-    assert len(update_calls) == 0
-    print("Result: Did not fire, manually snoozed. (Correct)")
+    ]'''
 
-if __name__ == "__main__":
-    test_composite_rules()
-    
+content = content.replace(old_test_4, new_test_4)
+
+portfolio_test = '''
     # 5. Test Portfolio Rule
     mock_cursor.reset_mock()
     mock_cursor.fetchall.side_effect = [
@@ -150,7 +91,7 @@ if __name__ == "__main__":
         ]
     ]
     
-    print("\n--- Testing Portfolio Rule ---")
+    print("\\n--- Testing Portfolio Rule ---")
     print("Test 8: Portfolio drops below 35,000 (0.5 * 65k + 2 * 3.5k = 39.5k)")
     # Ticks to BTC 65k, ETH 3.5k
     test_recent = {'BTC': 65000}
@@ -176,5 +117,10 @@ if __name__ == "__main__":
     update_calls = [call for call in mock_cursor.execute.call_args_list if "UPDATE rules SET is_currently_triggered = TRUE" in call[0][0]]
     assert len(update_calls) == 1
     print("Result: Fired successfully! (Correct)")
+'''
 
-    print("\nALL COMPOSITE RULE, COOLDOWN, SNOOZE, & PORTFOLIO TESTS PASSED!")
+content = content.replace('print("\\nALL COMPOSITE RULE, COOLDOWN, & SNOOZE TESTS PASSED!")', portfolio_test + '\n    print("\\nALL COMPOSITE RULE, COOLDOWN, SNOOZE, & PORTFOLIO TESTS PASSED!")')
+
+with open('e:/Application/RippleAlert/scratch.py', 'w', encoding='utf-8') as f:
+    f.write(content)
+print("done")

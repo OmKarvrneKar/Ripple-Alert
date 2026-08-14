@@ -58,51 +58,156 @@ def evaluate_rule(rule, current_price, current_ts, redis_client):
                 
     return condition_met, rule_description
 
-def check_rules(redis_client, prices_data, timestamp_str):
+def check_rules(redis_client, recent_prices, global_prices, timestamp_str):
     conn = get_db_connection()
     try:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute('''
-            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, u.email 
+            SELECT r.id, r.user_id, r.symbol, r.condition, r.threshold, r.window_minutes, r.is_currently_triggered, r.logic_operator, r.parent_rule_id, r.cooldown_minutes, r.last_triggered_at, r.snoozed_until, r.rule_type, u.email 
             FROM rules r
             JOIN users u ON r.user_id = u.id
         ''')
         rules = cursor.fetchall()
         
+        cursor.execute("SELECT user_id, symbol, amount_held FROM portfolio_holdings")
+        holdings_data = cursor.fetchall()
+        
+        portfolio_by_user = {}
+        for h in holdings_data:
+            uid = h['user_id']
+            if uid not in portfolio_by_user:
+                portfolio_by_user[uid] = {}
+            portfolio_by_user[uid][h['symbol']] = h['amount_held']
+            
         # Update Redis sorted sets for percent change
         current_ts = datetime.fromisoformat(timestamp_str).timestamp()
         
-        for symbol, current_price in prices_data.items():
+        for symbol, current_price in recent_prices.items():
             # Add to sorted set (value must be unique, so price_timestamp)
             redis_client.zadd(f"history:{symbol}", {f"{current_price}_{current_ts}": current_ts})
         
-        for rule in rules:
-            symbol = rule['symbol']
-            if symbol not in prices_data:
-                continue
-                
-            current_price = prices_data[symbol]
+        parent_rules = [r for r in rules if r['parent_rule_id'] is None]
+        child_rules = [r for r in rules if r['parent_rule_id'] is not None]
+        
+        children_by_parent = {}
+        for c in child_rules:
+            if c['parent_rule_id'] not in children_by_parent:
+                children_by_parent[c['parent_rule_id']] = []
+            children_by_parent[c['parent_rule_id']].append(c)
+            
+        for rule in parent_rules:
             is_triggered = bool(rule['is_currently_triggered'])
             rule_id = rule['id']
             user_id = rule['user_id']
             email = rule['email']
+            cooldown_minutes = rule['cooldown_minutes'] or 0
+            last_triggered_at = rule['last_triggered_at']
+            snoozed_until = rule['snoozed_until']
             
-            condition_met, rule_description = evaluate_rule(rule, current_price, current_ts, redis_client)
+            in_cooldown = False
+            
+            # Check manual snooze override
+            if snoozed_until:
+                if isinstance(snoozed_until, datetime):
+                    snooze_ts = snoozed_until.timestamp()
+                elif isinstance(snoozed_until, str):
+                    snooze_ts = datetime.fromisoformat(snoozed_until).timestamp()
+                else:
+                    snooze_ts = 0
+                if current_ts < snooze_ts:
+                    in_cooldown = True
+            
+            # Check automatic cooldown
+            if not in_cooldown and last_triggered_at and cooldown_minutes > 0:
+                if isinstance(last_triggered_at, datetime):
+                    last_ts = last_triggered_at.timestamp()
+                elif isinstance(last_triggered_at, str):
+                    last_ts = datetime.fromisoformat(last_triggered_at).timestamp()
+                else:
+                    last_ts = 0
+                
+                if (current_ts - last_ts) < (cooldown_minutes * 60):
+                    in_cooldown = True
+            
+            if rule.get('rule_type') == 'portfolio_value':
+                user_holdings = portfolio_by_user.get(user_id, {})
+                affected = any(sym in recent_prices for sym in user_holdings.keys())
+                if not affected:
+                    continue
+                    
+                total_value = 0.0
+                for sym, amt in user_holdings.items():
+                    price = global_prices.get(sym, 0.0)
+                    total_value += amt * price
+                    
+                condition_met = False
+                if rule['condition'] == 'below' and total_value < rule['threshold']:
+                    condition_met = True
+                elif rule['condition'] == 'above' and total_value > rule['threshold']:
+                    condition_met = True
+                    
+                rule_description = f"Portfolio value {rule['condition']} ${rule['threshold']} (Current: ${total_value:,.2f})" if condition_met else ""
+                symbol_to_log = "PORTFOLIO"
+                price_to_log = total_value
+                
+            elif rule['logic_operator']:
+                children = children_by_parent.get(rule_id, [])
+                if not children:
+                    continue
+                    
+                # Check if this composite rule is affected by the recent tick
+                affected = any(child['symbol'] in recent_prices for child in children)
+                if not affected:
+                    continue
+                    
+                child_results = []
+                for child in children:
+                    child_sym = child['symbol']
+                    if child_sym not in global_prices:
+                        child_results.append((False, ""))
+                    else:
+                        child_results.append(evaluate_rule(child, global_prices[child_sym], current_ts, redis_client))
+                
+                if rule['logic_operator'] == 'AND':
+                    condition_met = all(res[0] for res in child_results)
+                    rule_description = " AND ".join([res[1] for res in child_results if res[1]]) if condition_met else ""
+                elif rule['logic_operator'] == 'OR':
+                    condition_met = any(res[0] for res in child_results)
+                    rule_description = " OR ".join([res[1] for res in child_results if res[0]]) if condition_met else ""
+                else:
+                    condition_met = False
+                    rule_description = ""
+                    
+                symbol_to_log = "MULTI"
+                price_to_log = 0.0
+                
+            else:
+                symbol = rule['symbol']
+                if symbol not in recent_prices:
+                    continue
+                    
+                current_price = recent_prices[symbol]
+                condition_met, rule_description = evaluate_rule(rule, current_price, current_ts, redis_client)
+                symbol_to_log = symbol
+                price_to_log = current_price
                 
             if condition_met and not is_triggered:
+                if in_cooldown:
+                    logging.debug(f"⏳ SKIP ALERT ⏳ Rule {rule_id} for {email} condition met, but in cooldown or snoozed.")
+                    continue
                 # Trigger alert
-                logging.info(f"🚨 ALERT SENT 🚨 To: {email} | {rule_description} (Current: ${current_price})")
-                cursor.execute("UPDATE rules SET is_currently_triggered = TRUE WHERE id = %s", (rule_id,))
-                log_alert_history(conn, user_id, symbol, rule_description, current_price, timestamp_str)
+                logging.info(f"🚨 ALERT SENT 🚨 To: {email} | {rule_description}")
+                cursor.execute("UPDATE rules SET is_currently_triggered = TRUE, last_triggered_at = to_timestamp(%s) WHERE id = %s", (current_ts, rule_id,))
+                log_alert_history(conn, user_id, symbol_to_log, rule_description, price_to_log, timestamp_str)
                 
             elif not condition_met and is_triggered:
                 # Reset alert
-                logging.info(f"🔄 ALERT RESET 🔄 {symbol} condition no longer met. Alert re-armed.")
+                logging.info(f"🔄 ALERT RESET 🔄 {symbol_to_log} condition no longer met. Alert re-armed.")
                 cursor.execute("UPDATE rules SET is_currently_triggered = FALSE WHERE id = %s", (rule_id,))
-                log_alert_history(conn, user_id, symbol, f"RESET: {symbol} condition no longer met", current_price, timestamp_str)
+                log_alert_history(conn, user_id, symbol_to_log, f"RESET: condition no longer met", price_to_log, timestamp_str)
                 
         # Clean up old data from redis (keep last 24h max)
-        for symbol in prices_data.keys():
+        for symbol in recent_prices.keys():
             redis_client.zremrangebyscore(f"history:{symbol}", "-inf", current_ts - 86400)
             
         conn.commit()
@@ -118,13 +223,16 @@ def main():
     pubsub = r.pubsub()
     pubsub.subscribe("prices")
     
+    global_prices_cache = {}
+    
     for message in pubsub.listen():
         if message["type"] == "message":
             data = json.loads(message["data"])
             prices = data.get("data", {})
             timestamp_str = data.get("timestamp")
             if prices and timestamp_str:
-                check_rules(r, prices, timestamp_str)
+                global_prices_cache.update(prices)
+                check_rules(r, prices, global_prices_cache, timestamp_str)
 
 if __name__ == "__main__":
     while True:

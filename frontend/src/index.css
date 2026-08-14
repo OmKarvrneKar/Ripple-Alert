@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --color-midnight: #0B0E14;
+  --color-slate-deep: #151A22;
+  --color-azure: #3B82F6;
+  --color-emerald-muted: #10B981;
+  --color-crimson: #EF4444;
+  --color-frost: #F3F4F6;
+  --color-steel: #9CA3AF;
+  
+  --font-display: "Outfit", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-midnight);
+    color: var(--color-frost);
+    font-family: var(--font-body);
+  }
+  
+  button, input, select {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-azure focus-visible:ring-offset-2 focus-visible:ring-offset-midnight transition-shadow;
+  }
+}
+
+@layer utilities {
+  @media (prefers-reduced-motion: no-preference) {
+    .animate-ripple-up {
+      animation: rippleUp 1s ease-out forwards;
+    }
+    
+    .animate-ripple-down {
+      animation: rippleDown 1s ease-out forwards;
+    }
+  }
+  
+  @keyframes rippleUp {
+    0% {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+      background-color: rgba(16, 185, 129, 0.1);
+    }
+    70% {
+      box-shadow: 0 0 0 20px rgba(16, 185, 129, 0);
+      background-color: var(--color-slate-deep);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      background-color: var(--color-slate-deep);
+    }
+  }
+
+  @keyframes rippleDown {
+    0% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+      background-color: rgba(239, 68, 68, 0.1);
+    }
+    70% {
+      box-shadow: 0 0 0 20px rgba(239, 68, 68, 0);
+      background-color: var(--color-slate-deep);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+      background-color: var(--color-slate-deep);
+    }
+  }
+}

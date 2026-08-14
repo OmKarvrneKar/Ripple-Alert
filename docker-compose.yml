@@ -42,6 +42,15 @@ services:
       redis:
         condition: service_started
 
+  sentiment-fetcher:
+    build: .
+    command: python sentiment_fetcher.py
+    environment:
+      - DATABASE_URL=postgresql://ripple_user:ripple_pass@db:5432/ripplealert
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
     image: postgres:15
     environment:
