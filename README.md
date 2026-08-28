@@ -54,4 +54,4 @@ graph TD
 - **Add Automated Tests**: Implement `pytest` suites to rigorously test API endpoints and alert engine edge cases.
 - **Support More Asset Types**: Expand the fetcher to pull a wider variety of cryptocurrencies or traditional stocks.
 - **Add Push Notifications**: Integrate SendGrid or Twilio to send actual SMS/Email alerts when a rule fires, rather than just logging it in the database.
-- **Frontend Framework**: Migrate the vanilla frontend to React or Next.js for better state management and component reusability..
+- **Frontend Framework**: Migrate the vanilla frontend to React or Next.js for better state management and component reusability.
