@@ -48,7 +48,7 @@ graph TD
    - `alert-engine` (Alert rule processor)
    - `db` (PostgreSQL on port 5432)
    - `redis` (Redis broker on port 6379)
-4. Open `frontend/index.html` in your web browser.
+4. Open `frontend/index.html` in your web browser
 
 ## What I'd Improve Next
 - **Add Automated Tests**: Implement `pytest` suites to rigorously test API endpoints and alert engine edge cases.
